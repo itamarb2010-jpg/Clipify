@@ -1,0 +1,59 @@
+Clipify — All Rights Reserved
+Copyright (c) 2026 ItamarPizzaKing. All rights reserved.
+
+This license governs use of the Clipify mod and its source code (the "Software").
+By downloading, installing, running, or accessing the Software you agree to these
+terms. If you do not agree, do not use the Software.
+
+1. OWNERSHIP
+   The Software is owned by the copyright holder and is protected by copyright law.
+   All rights not expressly granted below are reserved.
+
+2. PERMITTED USE
+   You are granted a personal, non-exclusive, non-transferable, revocable license to:
+   (a) download the official compiled build of the Software from an official source;
+       and
+   (b) install and run it, unmodified, on your own device(s) for your own personal
+       gameplay.
+
+3. RESTRICTIONS
+   Except with the copyright holder's prior written permission, you MAY NOT:
+   (a) redistribute, re-upload, mirror, publish, host, or otherwise make the Software
+       (in whole or in part, compiled or source, original or modified) available to
+       any third party;
+   (b) include or bundle the Software in any modpack, launcher, collection,
+       compilation, or other distribution;
+   (c) modify, adapt, translate, or create derivative works from the Software and
+       distribute them;
+   (d) sell, rent, lease, sublicense, or otherwise commercialize the Software;
+   (e) remove or alter any copyright, license, or attribution notices; or
+   (f) copy or reuse any part of the source code in another project.
+
+   Making private modifications for your own personal use only (and not distributing
+   them) is permitted.
+
+3.1 REDISTRIBUTION AND VIDEO OUTPUT
+   Video clips that you create with the Software are yours; this license does not
+   restrict what you do with the clips you record.
+
+4. THIRD-PARTY COMPONENTS
+   The Software runs on the Fabric mod loader and Fabric API (Apache License 2.0) and
+   invokes FFmpeg — a separate program downloaded at runtime — which is licensed under
+   the GNU General Public License. Those components are the property of their
+   respective authors and remain governed by their own licenses; nothing in this
+   license grants or restricts any right in them. See NOTICE.md.
+
+5. NO WARRANTY
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+   INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+   PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE
+   LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM, OUT OF, OR IN
+   CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+6. TERMINATION
+   This license terminates automatically if you breach any of its terms. On
+   termination you must stop using and delete all copies of the Software.
+
+7. CONTACT
+   For permission to do anything not allowed above (redistribution, modpacks, reuse,
+   etc.), contact the copyright holder.

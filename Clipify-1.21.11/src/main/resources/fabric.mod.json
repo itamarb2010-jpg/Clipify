@@ -1,0 +1,41 @@
+{
+	"schemaVersion": 1,
+	"id": "clipify",
+	"version": "${version}",
+	"name": "Clipify",
+	"description": "Instant replay clipping for Minecraft. Keeps a rolling buffer of the last N seconds of gameplay and saves it to an MP4 with a single hotkey. No OBS, Medal, ShadowPlay or Game Bar required.",
+	"authors": [
+		"Clipify contributors"
+	],
+	"contact": {
+		"homepage": "https://github.com/clipify/clipify",
+		"sources": "https://github.com/clipify/clipify",
+		"issues": "https://github.com/clipify/clipify/issues"
+	},
+	"license": "ARR",
+	"icon": "assets/clipify/icon.png",
+	"environment": "client",
+	"entrypoints": {
+		"client": [
+			"dev.clipify.Clipify"
+		],
+		"modmenu": [
+			"dev.clipify.config.ModMenuIntegration"
+		]
+	},
+	"mixins": [
+		{
+			"config": "clipify.mixins.json",
+			"environment": "client"
+		}
+	],
+	"depends": {
+		"fabricloader": ">=${loader_version}",
+		"minecraft": "~${minecraft_version}",
+		"java": ">=21",
+		"fabric-api": "*"
+	},
+	"suggests": {
+		"modmenu": "*"
+	}
+}

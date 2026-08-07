@@ -1,0 +1,101 @@
+plugins {
+	id 'net.fabricmc.fabric-loom-remap' version "${loom_version}"
+}
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+	archivesName = project.archives_base_name
+}
+
+repositories {
+	maven {
+		name = 'TerraformersMC'
+		url = 'https://maven.terraformersmc.com/releases/'
+	}
+}
+
+loom {
+	// Client-only mod: a single `main` source set keeps things simple and the
+	// mod is gated to the client through `"environment": "client"` in fabric.mod.json.
+	runtimeOnlyLog4j = true
+
+	runs {
+		client {
+			// Opt-in: `./gradlew runClient -Pmm.quickplay=<worldFolder>` boots straight into a
+			// singleplayer world, which is how the capture path is smoke-tested end to end.
+			if (project.hasProperty('mm.quickplay')) {
+				programArgs('--quickPlaySingleplayer', project.property('mm.quickplay').toString())
+			}
+		}
+	}
+}
+
+dependencies {
+	minecraft "com.mojang:minecraft:${project.minecraft_version}"
+	mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
+	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+
+	modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+
+	// Mod Menu integration is optional at runtime; we only need it to compile the
+	// `ModMenuApi` entrypoint. `modCompileOnly` keeps it out of the runtime classpath
+	// of anyone who does not have Mod Menu installed.
+	modCompileOnly "com.terraformersmc:modmenu:${project.modmenu_version}"
+	// ...but include it in the dev runtime so the config screen can actually be tested.
+	modLocalRuntime "com.terraformersmc:modmenu:${project.modmenu_version}"
+
+	testImplementation platform('org.junit:junit-bom:5.11.4')
+	testImplementation 'org.junit.jupiter:junit-jupiter'
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+processResources {
+	def props = [version: project.version, minecraft_version: project.minecraft_version, loader_version: project.loader_version]
+	props.each { k, v -> inputs.property(k, v) }
+
+	filesMatching("fabric.mod.json") {
+		expand props
+	}
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.release = 21
+	it.options.encoding = 'UTF-8'
+}
+
+test {
+	useJUnitPlatform()
+	// Gradle forks a separate JVM for tests, so forward the opt-in FFmpeg path for the
+	// integration test (PipelineIntegrationTest skips itself when this is absent).
+	if (System.getProperty('clipify.ffmpeg') != null) {
+		systemProperty 'clipify.ffmpeg', System.getProperty('clipify.ffmpeg')
+	}
+	if (System.getProperty('clipify.testUpload') != null) {
+		systemProperty 'clipify.testUpload', System.getProperty('clipify.testUpload')
+	}
+	testLogging {
+		events 'passed', 'skipped', 'failed'
+		showStandardStreams = true
+	}
+}
+
+java {
+	withSourcesJar()
+
+	sourceCompatibility = JavaVersion.VERSION_21
+	targetCompatibility = JavaVersion.VERSION_21
+}
+
+jar {
+	def projectName = project.name
+	inputs.property "projectName", projectName
+
+	from("LICENSE") {
+		rename { "${it}_$projectName" }
+	}
+	from("NOTICE.md") {
+		rename { "${it}_$projectName" }
+	}
+}

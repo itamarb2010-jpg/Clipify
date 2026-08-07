@@ -1,0 +1,91 @@
+plugins {
+	id 'net.fabricmc.fabric-loom' version "${loom_version}"
+}
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+	archivesName = project.archives_base_name
+}
+
+repositories {
+	maven {
+		name = 'TerraformersMC'
+		url = 'https://maven.terraformersmc.com/releases/'
+	}
+}
+
+loom {
+	// Client-only mod: a single `main` source set keeps things simple and the mod is gated to the
+	// client through `"environment": "client"` in fabric.mod.json.
+	runs {
+		client {
+			if (project.hasProperty('mm.quickplay')) {
+				programArgs('--quickPlaySingleplayer', project.property('mm.quickplay').toString())
+			}
+		}
+	}
+}
+
+dependencies {
+	// Minecraft 26.x ships Mojang-mapped (non-obfuscated); no `mappings` line is used.
+	minecraft "com.mojang:minecraft:${project.minecraft_version}"
+	implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+
+	// Mod Menu: needed to compile the ModMenuApi entrypoint and to test the config screen in dev.
+	// (The distributed jar does not bundle it; fabric.mod.json only *suggests* modmenu.)
+	implementation "com.terraformersmc:modmenu:${project.modmenu_version}"
+
+	testImplementation platform('org.junit:junit-bom:5.11.4')
+	testImplementation 'org.junit.jupiter:junit-jupiter'
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+processResources {
+	def props = [version: project.version, minecraft_version: project.minecraft_version, loader_version: project.loader_version]
+	props.each { k, v -> inputs.property(k, v) }
+
+	filesMatching("fabric.mod.json") {
+		expand props
+	}
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.release = 25
+	it.options.encoding = 'UTF-8'
+}
+
+test {
+	useJUnitPlatform()
+	if (System.getProperty('clipify.ffmpeg') != null) {
+		systemProperty 'clipify.ffmpeg', System.getProperty('clipify.ffmpeg')
+	}
+	if (System.getProperty('clipify.testUpload') != null) {
+		systemProperty 'clipify.testUpload', System.getProperty('clipify.testUpload')
+	}
+	testLogging {
+		events 'passed', 'skipped', 'failed'
+		showStandardStreams = true
+	}
+}
+
+java {
+	withSourcesJar()
+
+	sourceCompatibility = JavaVersion.VERSION_25
+	targetCompatibility = JavaVersion.VERSION_25
+}
+
+jar {
+	def projectName = project.name
+	inputs.property "projectName", projectName
+
+	from("LICENSE") {
+		rename { "${it}_$projectName" }
+	}
+	from("NOTICE.md") {
+		rename { "${it}_$projectName" }
+	}
+}
