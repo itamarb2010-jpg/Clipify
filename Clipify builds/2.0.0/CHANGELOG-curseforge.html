@@ -1,0 +1,52 @@
+<div class="sheet">
+
+<h1>Clipify 2.0.0</h1>
+
+<hr>
+
+<h2>New</h2>
+
+<p><strong>As many clip keys as you want — each with its own length</strong><br>
+New <strong>Hotkeys</strong> tab in settings. Hit <strong>Add Hotkey</strong> and pick what it does. For clip keys you choose the length, so you can have one key that saves the <strong>last 30 seconds</strong> and another that saves the <strong>last 2 minutes</strong>.</p>
+
+<p><strong>Screenshot key</strong><br>
+Snaps the picture, saves it to a <strong>screenshots</strong> folder, and <strong>copies it to your clipboard</strong> — paste it straight into Discord or anywhere else. The Clips menu now sorts by <strong>All / Clips / Screenshots</strong>.</p>
+
+<p><strong>One-click quality</strong><br>
+Pick <strong>Low</strong>, <strong>Standard</strong> or <strong>High</strong> and you're done. Or choose <strong>Custom</strong> and set everything yourself.</p>
+
+<p><strong>Search and rename your clips</strong><br>
+The Clips screen has a <strong>search box</strong> that filters as you type, and you can <strong>right-click any clip to rename it</strong>.</p>
+
+<p><strong>"Open last clip" hotkey</strong><br>
+Jumps <strong>straight into the editor</strong> with your most recent clip.</p>
+
+<p><strong>Shared clips get a watermark</strong><br>
+When you share, Clipify stamps a small <strong>"clipify"</strong> logo in the bottom-right and uploads that copy, so the link plays inline in Discord. <strong>Your saved file stays untouched — no logo.</strong></p>
+
+<p><strong>Discord shows what you're playing</strong><br>
+While you're in-game your Discord profile shows a <strong>"Playing Minecraft with Clipify"</strong> card with the Clipify logo and a <strong>Download Clipify</strong> button for your friends. Turn it off in <strong>Settings → General → Show on Discord</strong>.</p>
+
+<hr>
+
+<h2>Changed</h2>
+
+<ul>
+  <li><strong>Clip and screenshot anywhere.</strong> You can now grab a clip or screenshot from the <strong>menus</strong> too — multiplayer list, title screen, pause — not just while you're in a world. <em>(The recorder runs in menus now, so it uses a little GPU while you sit on them.)</em></li>
+  <li><strong>Any frame rate you like.</strong> Type any FPS from <strong>10 to 240</strong> instead of picking from a short list.</li>
+  <li><strong>Settings tidied up.</strong> The old <strong>Video</strong> tab is now <strong>Quality</strong>, and <strong>Controls</strong> is now <strong>Hotkeys</strong>. General and Audio are unchanged.</li>
+</ul>
+
+<hr>
+
+<h2>Fixed</h2>
+
+<ul>
+  <li><strong>Sound now lines up with the picture.</strong> Clip audio could run about a second ahead of the video, and it drifted further whenever the game went quiet for a while. Clipify now cuts the sound from the exact moment the clip's first frame was captured, so voice and game audio land where they belong.</li>
+  <li><strong>Clips no longer lose their last moment.</strong> Saving with audio on could cut the final second or so off the end — the part you pressed the key for. Fixed.</li>
+  <li><strong>Same quality everywhere.</strong> Your clip used to look different in every place you saw it: the share link was shrunk to 1080p and re-compressed hard, the editor preview was decoded small (and got softer the moment you hit play), and dragging the playhead showed a blurry stand-in. Now the <strong>link</strong> keeps the clip's own resolution and near-original quality, the <strong>editor</strong> decodes at the exact size it's drawn — so the preview matches the file — and <strong>dragging</strong> snaps to the sharp frame as soon as it's ready. <strong>Trimming</strong> keeps its quality too. <em>(Uploads are bigger, so they take a little longer.)</em></li>
+  <li><strong>Edited clips keep their sound.</strong> Trimming a clip in the editor used to make it silent. Fixed.</li>
+  <li><strong>Turning off "Show on Discord" no longer crashes the game.</strong></li>
+</ul>
+
+</div>

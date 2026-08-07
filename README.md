@@ -1,6 +1,6 @@
 # Clipify
 
-> **Instant replay for Minecraft.** Save the last 15–120 seconds of your gameplay with a single keypress - no OBS, no Medal, no ShadowPlay, no account.
+> **Instant replay for Minecraft.** Save the last 5 seconds to 10 minutes of your gameplay with a single keypress - no OBS, no Medal, no ShadowPlay, no account.
 
 [![Fabric](https://cdn.jsdelivr.net/npm/@intergrav/devins-badges@3/assets/compact/supported/fabric_vector.svg)](https://fabricmc.net/) [![Modrinth](https://cdn.jsdelivr.net/npm/@intergrav/devins-badges@3/assets/compact/available/modrinth_vector.svg)](https://modrinth.com/mod/clipify) [![Discord](https://cdn.jsdelivr.net/npm/@intergrav/devins-badges@3/assets/compact/social/discord-plural_vector.svg)](https://discord.gg/g3a7pZTU9F)
 
@@ -121,7 +121,7 @@ Clips are saved to `.minecraft/clipify/clips/` with timestamped filenames; scree
 ***
 
 ## Links
-
+*   🧑‍💻 **Source code** - [https://github.com/itamarb2010-jpg/Clipify](https://github.com/itamarb2010-jpg/Clipify)
 *   💬 **Chat & support** - [https://discord.gg/jAXF5vARYm](https://discord.gg/jAXF5vARYm)
 *   🌐 **Portfolio** - [https://vaguestan.pages.dev](https://vaguestan.pages.dev/)
 
