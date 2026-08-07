@@ -17,7 +17,7 @@ Clipify is a A Medal-like instant replay mod for Minecraft. Save your recent gam
 *   **Hardware encoding** (NVIDIA NVENC, AMD AMF, Intel QuickSync) with an automatic **libx264** software fallback, so it runs well on almost any machine.
 *   Saves are **near-instant** - clips are stitched from the buffer with no re-encode.
 
-### Microphone & PC audio _(new in 1.1.0)_
+### Microphone & PC audio
 
 *   Clips now record **sound** - your **microphone** and your **PC / desktop audio**, mixed straight into the saved MP4.
 *   **Zero-setup PC audio on Windows** - captures whatever is playing to any output device (headphones, speakers, a virtual-cable output), nothing to install.
@@ -26,7 +26,7 @@ Clipify is a A Medal-like instant replay mod for Minecraft. Save your recent gam
 *   New **Audio** category in settings, styled to match the rest of the menu.
 *   _macOS: microphone capture works, PC audio isn’t supported there yet._
 
-### In-game clip editor _(new in 1.1.0)_
+### In-game clip editor
 
 *   Browse every recording from the new **Clips** screen and edit it **without leaving Minecraft**.
 *   Live preview with **play/pause**, a **timeline**, and **draggable in/out trim handles** over a thumbnail filmstrip - with **audio playing back in sync**.
