@@ -1,6 +1,7 @@
 package dev.clipify.ui;
 
 import dev.clipify.Clipify;
+import dev.clipify.ClipifyLog;
 import dev.clipify.ReplayBufferService;
 import dev.clipify.encode.ClipLibrary;
 import net.minecraft.client.gl.RenderPipelines;
@@ -229,14 +230,22 @@ public final class ClipEditScreen extends Screen {
 		}
 		busy = true;
 		status = "Trimming…";
+		if (overwrite) {
+			// The preview decoder reads this very file and FFmpeg keeps its input open without
+			// FILE_SHARE_DELETE, so on Windows the finished trim could not be moved over the
+			// original while the player was alive — the save failed for no reason the user could
+			// see. Close the media first, exactly as deleting does; finishTrim() re-probes the new
+			// file and brings the preview back.
+			disposeMedia();
+		}
 		clearAndInit();
 		double s = start;
 		double e = end;
 		Thread t = new Thread(() -> {
+			Path dir = file.getParent();
+			Path tmp = overwrite ? dir.resolve(file.getFileName().toString() + ".trim.tmp.mp4") : null;
 			try {
-				Path dir = file.getParent();
 				if (overwrite) {
-					Path tmp = dir.resolve(file.getFileName().toString() + ".trim.tmp.mp4");
 					ClipLibrary.trim(ff, file, s, e, tmp);
 					ClipLibrary.replace(tmp, file);
 					ReplayBufferService svc = Clipify.service();
@@ -250,9 +259,15 @@ public final class ClipEditScreen extends Screen {
 					finishTrim("Saved a trimmed copy.");
 				}
 			} catch (Exception ex) {
+				ClipifyLog.LOGGER.error("Clipify: saving the trimmed clip failed", ex);
+				if (tmp != null) {
+					// Otherwise a failed save leaves a full-size half-clip in the clips folder.
+					ClipLibrary.deleteQuietly(tmp);
+				}
 				this.client.execute(() -> {
 					busy = false;
 					status = "Trim failed: " + ex.getMessage();
+					ensurePlayer(); // closed above for the overwrite; put the preview back
 					if (this.client.currentScreen == this) {
 						clearAndInit();
 					}

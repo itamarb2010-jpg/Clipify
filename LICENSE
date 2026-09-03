@@ -1,0 +1,67 @@
+Clipify License — MIT with Attribution
+
+Copyright (c) 2026 ItamarPizzaKing
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+1. NOTICE
+   The above copyright notice and this permission notice shall be included in
+   all copies or substantial portions of the Software.
+
+2. VISIBLE ATTRIBUTION
+   Any mod, jar, modpack, application, service, or other work that includes
+   the Software or any substantial portion of it — original or modified — must
+   display the following credit to its end users:
+
+       Clipify by Vaguestan10
+
+   The credit must be visible without reading the source code or unpacking any
+   archive. Placing it in ANY ONE of these satisfies this condition:
+
+     (a) the public description or store page of the work (Modrinth,
+         CurseForge, GitHub repository page, or equivalent);
+     (b) the README or user-facing documentation distributed with the work; or
+     (c) an in-game or in-application credits, about, or settings screen.
+
+   The credit must be legible and in the same language and typeface class as
+   the surrounding text. It may not be hidden, obfuscated, placed only in a
+   file users are not expected to open, or presented in a way that implies
+   someone other than the copyright holder authored the Software.
+
+   You may not remove, alter, or obscure existing Clipify credits, copyright
+   notices, or license notices in the Software.
+
+3. NO ENDORSEMENT
+   The name "Clipify" and the name of the copyright holder may not be used to
+   promote, endorse, or imply approval of works derived from the Software
+   beyond the factual credit required by condition 2.
+
+4. WHAT IS NOT RESTRICTED
+   Video clips recorded with the Software belong to the person who recorded
+   them. This license places no conditions on those clips: no credit is
+   required to publish, sell, or share them.
+
+   Private modifications you do not distribute require no credit.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+Third-party components
+
+Clipify runs on the Fabric mod loader and Fabric API (Apache License 2.0), and
+invokes FFmpeg — a separate program downloaded at runtime, not bundled — which
+is licensed under the GNU General Public License. Those components belong to
+their respective authors and remain governed by their own licenses; nothing
+here grants or restricts any right in them.

@@ -249,18 +249,18 @@ public final class ReplayBufferService {
 		pendingStartFailed = false;
 		activeFps = cfg.fps;
 
-		// Built here so the grabber and the encoder share one pool. The constructor only sizes the
-		// free list — the direct buffers themselves are allocated lazily on first use — so this is
-		// cheap enough for the render thread.
-		FramePool sharedPool = new FramePool(captureWidth * captureHeight * 4, FRAME_POOL_SIZE);
-		this.pool = sharedPool;
+		// Only used on GPUs that cannot persistently map a readback buffer; where they can, the
+		// grabber hands mapped frames straight to the encoder and this pool never allocates. The
+		// constructor only sizes the free list, so building it here is cheap enough for the render
+		// thread either way.
+		this.pool = new FramePool(captureWidth * captureHeight * 4, FRAME_POOL_SIZE);
 
 		worker.execute(() -> {
 			try {
 				SegmentRecorder rec = new SegmentRecorder(
 						ffmpegProvider.executable(), workspace.segmentsDir(),
 						captureWidth, captureHeight, cfg.fps, cfg.segmentSeconds,
-						cfg.ringSegmentCount(), cfg.videoBitrateKbps, encoder, sharedPool);
+						cfg.ringSegmentCount(), cfg.videoBitrateKbps, encoder);
 				// Audio is captured separately (Java Sound) so it can never stall the video encoder.
 				// The ring covers a whole segment more than the longest clip: a save takes whole
 				// segments, so the video it assembles starts up to one segment before the requested
@@ -384,8 +384,8 @@ public final class ReplayBufferService {
 		SegmentRecorder rec = recorder;
 		if (rec != null) {
 			rec.offer(frame);
-		} else if (pool != null) {
-			pool.release(frame.pixels());
+		} else {
+			frame.release();
 		}
 	}
 

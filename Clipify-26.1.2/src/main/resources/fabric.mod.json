@@ -12,7 +12,7 @@
 		"sources": "https://github.com/clipify/clipify",
 		"issues": "https://github.com/clipify/clipify/issues"
 	},
-	"license": "ARR",
+	"license": "MIT with Attribution (see LICENSE)",
 	"icon": "assets/clipify/icon.png",
 	"environment": "client",
 	"entrypoints": {

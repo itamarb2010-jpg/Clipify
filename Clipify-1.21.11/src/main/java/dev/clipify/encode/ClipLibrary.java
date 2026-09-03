@@ -250,13 +250,37 @@ public final class ClipLibrary {
 		return candidate;
 	}
 
-	/** Replaces {@code target} with {@code temp} atomically where possible. */
+	/**
+	 * Replaces {@code target} with {@code temp} atomically where possible, retrying briefly.
+	 *
+	 * <p>Windows refuses to replace a file another process still has open, and FFmpeg opens its
+	 * inputs without {@code FILE_SHARE_DELETE}. A preview decoder that was killed a moment ago can
+	 * still be holding the clip while the OS gets around to releasing the handle. Callers close
+	 * their players first; this covers the gap. Must be called off the render thread (it sleeps
+	 * between attempts).
+	 */
 	public static void replace(Path temp, Path target) throws IOException {
-		try {
-			Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-		} catch (IOException atomicFailed) {
-			Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
+		IOException last = null;
+		for (int i = 0; i < 20; i++) {
+			try {
+				Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+				return;
+			} catch (IOException atomicFailed) {
+				try {
+					Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
+					return;
+				} catch (IOException e) {
+					last = e;
+				}
+			}
+			try {
+				Thread.sleep(50);
+			} catch (InterruptedException e) {
+				Thread.currentThread().interrupt();
+				break;
+			}
 		}
+		throw new IOException("the clip file is still in use by another program", last);
 	}
 
 	public static boolean deleteQuietly(Path file) {

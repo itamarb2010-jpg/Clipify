@@ -1,0 +1,9 @@
+Clipify 2.0.1
+
+Fixed
+- Fresh installs could never record - the FFmpeg download returned 404. It now uses a build that stays up permanently, and falls back to the current one if a download ever fails again.
+- A failed FFmpeg download now says what went wrong and where to drop your own ffmpeg.exe, instead of showing a Java error.
+- "Trim failed" when saving an edit over the original - the editor's preview still had the clip open. The preview is now closed first, and a save that still fails cleans up its temp file.
+
+Changed
+- Recording costs noticeably less fps - frames go straight from the GPU to the encoder instead of being copied on the render thread.

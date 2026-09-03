@@ -3,7 +3,6 @@ package dev.clipify.encode;
 import dev.clipify.ClipifyLog;
 import dev.clipify.capture.CaptureMath;
 import dev.clipify.capture.CapturedFrame;
-import dev.clipify.capture.FramePool;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -17,6 +16,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -34,9 +34,13 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public final class SegmentRecorder {
 
-	/** Frames handed over but not yet written. Bounded — see {@link FramePool}. */
-	private static final int QUEUE_CAPACITY = 8;
-	private static final int WRITE_CHUNK = 256 * 1024;
+	/**
+	 * Frames handed over but not yet written. Deliberately shallow: a captured frame holds a readback
+	 * slot until it is written, so a deep queue would not buy throughput, it would only hold slots
+	 * hostage and make the frames that do get through older.
+	 */
+	private static final int QUEUE_CAPACITY = 4;
+	private static final int WRITE_CHUNK = 1024 * 1024;
 	/** Longest run of duplicated frames we will emit to cover a stall before resynchronising. */
 	private static final int MAX_DUPLICATE_FRAMES_FACTOR = 2;
 
@@ -49,7 +53,6 @@ public final class SegmentRecorder {
 	private final int fps;
 	private final int segmentSeconds;
 	private final int wrap;
-	private final FramePool pool;
 	private final VideoEncoder encoder;
 	private final int bitrateKbps;
 
@@ -74,7 +77,7 @@ public final class SegmentRecorder {
 	private volatile String failure;
 
 	public SegmentRecorder(Path ffmpeg, Path segmentDir, int width, int height, int fps,
-			int segmentSeconds, int wrap, int bitrateKbps, VideoEncoder encoder, FramePool pool) {
+			int segmentSeconds, int wrap, int bitrateKbps, VideoEncoder encoder) {
 		this.ffmpeg = ffmpeg;
 		this.segmentDir = segmentDir;
 		this.width = width;
@@ -84,7 +87,6 @@ public final class SegmentRecorder {
 		this.wrap = wrap;
 		this.bitrateKbps = bitrateKbps;
 		this.encoder = encoder;
-		this.pool = pool;
 	}
 
 	public Layout layout() {
@@ -155,6 +157,7 @@ public final class SegmentRecorder {
 		this.process = p;
 		this.failure = null;
 		running.set(true);
+		lowerProcessPriority(p);
 
 		logThread = new Thread(this::pumpLog, "Clipify-ffmpeg-log");
 		logThread.setDaemon(true);
@@ -162,9 +165,34 @@ public final class SegmentRecorder {
 
 		writerThread = new Thread(this::writerLoop, "Clipify-encoder-writer");
 		writerThread.setDaemon(true);
-		writerThread.setPriority(Thread.NORM_PRIORITY + 1);
+		// Deliberately NOT above normal: this thread shovels whole frames into a pipe, and every
+		// slice of a core it takes from Minecraft's render and main threads is a frame the player
+		// loses. Falling behind here only costs a dropped capture, which nobody sees.
+		writerThread.setPriority(Thread.NORM_PRIORITY - 1);
 		writerThread.start();
 		return true;
+	}
+
+	/**
+	 * Drops the encoder process below normal priority so it fills spare cores instead of competing
+	 * with Minecraft for them — the difference between "recording in the background" and "the game
+	 * stutters while recording". Best effort: if this fails the encoder simply runs as before.
+	 */
+	private static void lowerProcessPriority(Process p) {
+		if (!System.getProperty("os.name", "").toLowerCase(Locale.ROOT).startsWith("win")) {
+			// Linux/macOS: renice ourselves down is not possible for a child after the fact without
+			// native calls, and the schedulers there already handle this far better.
+			return;
+		}
+		try {
+			new ProcessBuilder("powershell", "-NoProfile", "-NonInteractive", "-Command",
+					"(Get-Process -Id " + p.pid() + ").PriorityClass = 'BelowNormal'")
+					.redirectOutput(ProcessBuilder.Redirect.DISCARD)
+					.redirectError(ProcessBuilder.Redirect.DISCARD)
+					.start();
+		} catch (IOException | RuntimeException e) {
+			ClipifyLog.LOGGER.debug("Could not lower the encoder's process priority", e);
+		}
 	}
 
 	// ---------------------------------------------------------------- offer
@@ -175,12 +203,12 @@ public final class SegmentRecorder {
 	 */
 	public void offer(CapturedFrame frame) {
 		if (!running.get()) {
-			pool.release(frame.pixels());
+			frame.release();
 			return;
 		}
 		if (!queue.offer(frame)) {
 			framesDroppedQueueFull.incrementAndGet();
-			pool.release(frame.pixels());
+			frame.release();
 		}
 	}
 
@@ -190,7 +218,7 @@ public final class SegmentRecorder {
 		Process p = process;
 		OutputStream out = p.getOutputStream();
 		byte[] scratch = new byte[WRITE_CHUNK];
-		ByteBuffer retained = null;
+		CapturedFrame retained = null;
 		long originNanos = Long.MIN_VALUE;
 		long lastIndex = -1L;
 		int maxDuplicates = fps * MAX_DUPLICATE_FRAMES_FACTOR;
@@ -215,7 +243,7 @@ public final class SegmentRecorder {
 				timelineOriginNanos.set(originNanos);
 
 				for (long i = 0; i < step.duplicates() && retained != null; i++) {
-					writeFrame(out, retained, scratch);
+					writeFrame(out, retained.pixels(), scratch);
 					framesDuplicated.incrementAndGet();
 				}
 				lastIndex = step.targetIndex();
@@ -223,11 +251,12 @@ public final class SegmentRecorder {
 				writeFrame(out, frame.pixels(), scratch);
 				framesWritten.incrementAndGet();
 
-				// Keep this frame around so the next gap can be filled by repeating it.
+				// Keep this frame around so the next gap can be filled by repeating it. Holding it
+				// also holds its readback slot, which is why the ring carries spares.
 				if (retained != null) {
-					pool.release(retained);
+					retained.release();
 				}
-				retained = frame.pixels();
+				retained = frame;
 			}
 		} catch (InterruptedException e) {
 			Thread.currentThread().interrupt();
@@ -238,7 +267,7 @@ public final class SegmentRecorder {
 			}
 		} finally {
 			if (retained != null) {
-				pool.release(retained);
+				retained.release();
 			}
 			drainQueueToPool();
 			try {
@@ -264,7 +293,7 @@ public final class SegmentRecorder {
 	private void drainQueueToPool() {
 		CapturedFrame f;
 		while ((f = queue.poll()) != null) {
-			pool.release(f.pixels());
+			f.release();
 		}
 	}
 

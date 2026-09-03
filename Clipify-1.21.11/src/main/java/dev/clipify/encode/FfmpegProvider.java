@@ -18,6 +18,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -33,20 +34,40 @@ import java.util.zip.ZipInputStream;
  *   <li>{@code <gameDir>/clipify/bin/ffmpeg[.exe]} — a previous download, or one the user dropped
  *       in by hand.</li>
  *   <li>{@code ffmpeg} on {@code PATH} — a convenience only; the mod never <i>requires</i> it.</li>
- *   <li>A pinned, SHA-256 verified download from an immutable release URL.</li>
+ *   <li>A pinned, SHA-256 verified download from a long-lived release URL, falling back to the
+ *       upstream rolling release if that one has gone away.</li>
  * </ol>
  *
  * <p>All work happens off the render thread. Callers poll {@link #state()} / {@link #executable()}.
  */
 public final class FfmpegProvider {
 
-	/** Immutable BtbN auto-build tag that the pinned checksums below belong to. */
-	private static final String BTBN_TAG = "autobuild-2026-07-22-13-36";
+	/**
+	 * BtbN auto-build tag the pinned checksums below belong to.
+	 *
+	 * <p>This must always be a <b>month-end</b> tag. BtbN keeps the last auto-build of each month
+	 * indefinitely but prunes the daily ones after about two weeks, so pinning a daily tag makes
+	 * every fresh install 404 the moment that release is deleted.
+	 */
+	private static final String BTBN_TAG = "autobuild-2026-07-31-14-10";
 	private static final String BTBN_BASE =
 			"https://github.com/BtbN/FFmpeg-Builds/releases/download/" + BTBN_TAG + "/";
-	private static final String BTBN_STEM = "ffmpeg-n8.1.2-30-g45f1910444-";
+	private static final String BTBN_STEM = "ffmpeg-n8.1.2-34-g9b6c8969e0-";
 
-	/** A pinned download: URL plus the SHA-256 the payload must hash to. */
+	/**
+	 * BtbN's rolling release, which is never deleted. Its contents change, so there is nothing to
+	 * pin — the expected hash is read from the {@code checksums.sha256} published beside the
+	 * archive. Only used when the pinned tag above cannot be fetched, so a pruned or briefly
+	 * unreachable release can never leave the mod unable to record.
+	 */
+	private static final String BTBN_LATEST_BASE =
+			"https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/";
+	private static final String BTBN_LATEST_STEM = "ffmpeg-n8.1-latest-";
+
+	/**
+	 * A download candidate: URL plus the SHA-256 the payload must hash to. A null {@code sha256}
+	 * means the expected hash is read from the {@code checksums.sha256} next to the URL.
+	 */
 	public record Build(String url, String sha256, long approxBytes) {}
 
 	public enum State {
@@ -124,47 +145,94 @@ public final class FfmpegProvider {
 						+ "Put an 'ffmpeg" + (isWindows() ? ".exe" : "") + "' binary in " + binDir);
 			}
 
-			Build build = pinnedBuild();
-			if (build == null) {
-				return fail("No pinned FFmpeg build for " + osName() + "/" + arch()
+			List<Build> builds = pinnedBuilds();
+			if (builds.isEmpty()) {
+				return fail("No FFmpeg build is available for " + osName() + "/" + arch()
 						+ ". Put an 'ffmpeg" + (isWindows() ? ".exe" : "") + "' binary in " + binDir);
 			}
 
 			Files.createDirectories(binDir);
-			Path archive = binDir.resolve("ffmpeg-download.tmp");
-			Files.deleteIfExists(archive);
 
-			state.set(State.DOWNLOADING);
-			ClipifyLog.LOGGER.info("Downloading FFmpeg ({} MB) from {}", build.approxBytes() / 1_000_000, build.url());
-			String actual = download(build.url(), archive, build.approxBytes());
-
-			state.set(State.INSTALLING);
-			if (!actual.equalsIgnoreCase(build.sha256())) {
-				Files.deleteIfExists(archive);
-				return fail("FFmpeg download failed checksum verification (expected "
-						+ build.sha256() + ", got " + actual + "). Nothing was installed.");
-			}
-
-			extractFfmpeg(archive, binDir);
-			Files.deleteIfExists(archive);
-
-			if (!isWindows()) {
+			// Try each source in turn. A release can be pruned upstream or be briefly unreachable,
+			// and one dead URL must not leave the mod permanently unable to record.
+			Exception lastFailure = null;
+			for (Build build : builds) {
 				try {
-					local.toFile().setExecutable(true, true);
-				} catch (SecurityException ignored) {
-					// Best effort; isWorkingFfmpeg() below is the real gate.
+					if (install(build, local)) {
+						ClipifyLog.LOGGER.info("FFmpeg installed at {}", local);
+						return succeed(local);
+					}
+					lastFailure = new IOException("the build from " + build.url() + " would not run");
+				} catch (Exception e) {
+					lastFailure = e;
+				}
+				ClipifyLog.LOGGER.warn("FFmpeg install from {} failed: {}", build.url(), lastFailure.toString());
+
+				if (lastFailure instanceof InterruptedException) {
+					// The game is shutting down; do not start another multi-hundred-MB download.
+					Thread.currentThread().interrupt();
+					break;
 				}
 			}
 
-			if (isWorkingFfmpeg(local)) {
-				ClipifyLog.LOGGER.info("FFmpeg installed at {}", local);
-				return succeed(local);
-			}
-			return fail("FFmpeg was downloaded and verified but would not run. See the log for details.");
+			return fail(downloadFailureMessage(lastFailure));
 		} catch (Exception e) {
 			ClipifyLog.LOGGER.error("FFmpeg setup failed", e);
-			return fail("FFmpeg setup failed: " + e);
+			return fail(downloadFailureMessage(e));
 		}
+	}
+
+	/**
+	 * Downloads, verifies and unpacks a single candidate.
+	 *
+	 * @return true if {@code local} is now a working FFmpeg
+	 * @throws IOException on a failed download or a checksum mismatch; the caller is free to try
+	 *         the next candidate
+	 */
+	private boolean install(Build build, Path local) throws IOException, InterruptedException {
+		Path archive = binDir.resolve("ffmpeg-download.tmp");
+		Files.deleteIfExists(archive);
+
+		String expected = build.sha256() != null ? build.sha256() : publishedSha256(build.url());
+
+		downloadPercent = 0;
+		state.set(State.DOWNLOADING);
+		ClipifyLog.LOGGER.info("Downloading FFmpeg ({} MB) from {}", build.approxBytes() / 1_000_000, build.url());
+		String actual = download(build.url(), archive, build.approxBytes());
+
+		state.set(State.INSTALLING);
+		if (!actual.equalsIgnoreCase(expected)) {
+			Files.deleteIfExists(archive);
+			throw new IOException("checksum verification failed (expected " + expected + ", got "
+					+ actual + "); nothing was installed");
+		}
+
+		try {
+			extractFfmpeg(archive, binDir);
+		} finally {
+			Files.deleteIfExists(archive);
+		}
+
+		if (!isWindows()) {
+			try {
+				local.toFile().setExecutable(true, true);
+			} catch (SecurityException ignored) {
+				// Best effort; isWorkingFfmpeg() below is the real gate.
+			}
+		}
+		return isWorkingFfmpeg(local);
+	}
+
+	/** Something a player can act on, rather than a raw exception class name. */
+	private String downloadFailureMessage(Exception cause) {
+		String detail = "unknown error";
+		if (cause != null) {
+			detail = cause.getMessage() != null && !cause.getMessage().isBlank()
+					? cause.getMessage()
+					: cause.toString();
+		}
+		return "Could not download FFmpeg (" + detail + "). Check your internet connection, or put an "
+				+ "'ffmpeg" + (isWindows() ? ".exe" : "") + "' binary in " + binDir + " and restart Minecraft.";
 	}
 
 	private boolean succeed(Path exe) {
@@ -209,48 +277,97 @@ public final class FfmpegProvider {
 	}
 
 	/**
-	 * The pinned build for this platform, or null if there is none.
+	 * Download candidates for this platform, best first, or empty if there are none.
 	 *
-	 * <p>Checksums were taken from the release's published {@code checksums.sha256} (BtbN) or
-	 * computed from the immutable versioned artifact (evermeet.cx). See NOTICE.md.
+	 * <p>The pinned checksums were taken from the release's published {@code checksums.sha256}
+	 * (BtbN) or computed from the immutable versioned artifact (evermeet.cx). Each
+	 * BtbN entry is followed by the same artifact on the rolling {@code latest} release, whose
+	 * checksum is fetched at download time because its contents change.
 	 */
-	static Build pinnedBuild() {
+	static List<Build> pinnedBuilds() {
 		String arch = arch();
 		boolean x64 = arch.equals("amd64") || arch.equals("x86_64");
 		boolean arm64 = arch.equals("aarch64") || arch.equals("arm64");
 
 		if (isWindows() && x64) {
-			return new Build(BTBN_BASE + BTBN_STEM + "win64-gpl-8.1.zip",
-					"f3c4d7c272390d18f57e5ee1e52466d28cbf728b923e188367e934456c061d51", 167_402_338L);
+			return List.of(
+					new Build(BTBN_BASE + BTBN_STEM + "win64-gpl-8.1.zip",
+							"cc4156d51387566ea8ba653fc3a04897bdf812fddf652428d9030bbf7ae24835", 167_402_338L),
+					new Build(BTBN_LATEST_BASE + BTBN_LATEST_STEM + "win64-gpl-8.1.zip", null, 167_402_338L));
 		}
 		if (isLinux() && x64) {
-			return new Build(BTBN_BASE + BTBN_STEM + "linux64-gpl-8.1.tar.xz",
-					"4ad0d6eb98bde796841050cf12bf9428e188446bd518b245fb4aa02f25b633a0", 124_900_000L);
+			return List.of(
+					new Build(BTBN_BASE + BTBN_STEM + "linux64-gpl-8.1.tar.xz",
+							"09fc77be269c7053e438b7e96548e4af97604faf96a42c4a3c56a1ad74c22c0a", 124_900_000L),
+					new Build(BTBN_LATEST_BASE + BTBN_LATEST_STEM + "linux64-gpl-8.1.tar.xz", null, 124_900_000L));
 		}
 		if (isLinux() && arm64) {
-			return new Build(BTBN_BASE + BTBN_STEM + "linuxarm64-gpl-8.1.tar.xz",
-					"369dac151ae4ebf752c789cc48fbb520a193665ba41463a39615777b7236222a", 107_000_000L);
+			return List.of(
+					new Build(BTBN_BASE + BTBN_STEM + "linuxarm64-gpl-8.1.tar.xz",
+							"177e40c91564dec3840096f3bf1ffe696b94330585972462cfc739fa29fe0e1a", 107_000_000L),
+					new Build(BTBN_LATEST_BASE + BTBN_LATEST_STEM + "linuxarm64-gpl-8.1.tar.xz", null, 107_000_000L));
 		}
 		if (isMac()) {
-			// evermeet.cx ships an x86_64 binary; it runs on Apple Silicon through Rosetta 2.
-			return new Build("https://evermeet.cx/ffmpeg/ffmpeg-8.1.2.zip",
-					"e91df72a1ee7c26606f90dd2dd4dcccc6a75140ff9ea6fdd50faae828b82ba69", 26_037_786L);
+			// evermeet.cx ships an x86_64 binary; it runs on Apple Silicon through Rosetta 2. Its
+			// versioned archives are kept indefinitely, so there is nothing to fall back to.
+			return List.of(new Build("https://evermeet.cx/ffmpeg/ffmpeg-8.1.2.zip",
+					"e91df72a1ee7c26606f90dd2dd4dcccc6a75140ff9ea6fdd50faae828b82ba69", 26_037_786L));
 		}
-		return null;
+		return List.of();
 	}
 
 	// ------------------------------------------------------------- download
 
-	private String download(String url, Path dest, long approxBytes) throws IOException, InterruptedException {
-		HttpClient client = HttpClient.newBuilder()
+	private static HttpClient httpClient() {
+		return HttpClient.newBuilder()
 				.followRedirects(HttpClient.Redirect.NORMAL)
 				.connectTimeout(Duration.ofSeconds(30))
 				.build();
-		HttpRequest request = HttpRequest.newBuilder(URI.create(url))
+	}
+
+	private static HttpRequest.Builder request(String url, Duration timeout) {
+		return HttpRequest.newBuilder(URI.create(url))
 				.header("User-Agent", "Clipify/1.0 (+https://github.com/clipify/clipify)")
-				.timeout(Duration.ofMinutes(30))
-				.GET()
-				.build();
+				.timeout(timeout)
+				.GET();
+	}
+
+	/**
+	 * Reads the expected hash for {@code archiveUrl} out of the {@code checksums.sha256} published
+	 * next to it. Used for the rolling release, whose contents cannot be pinned ahead of time.
+	 */
+	private static String publishedSha256(String archiveUrl) throws IOException, InterruptedException {
+		int slash = archiveUrl.lastIndexOf('/');
+		String name = archiveUrl.substring(slash + 1);
+		String listUrl = archiveUrl.substring(0, slash + 1) + "checksums.sha256";
+
+		HttpResponse<String> response = httpClient()
+				.send(request(listUrl, Duration.ofMinutes(2)).build(), HttpResponse.BodyHandlers.ofString());
+		if (response.statusCode() != 200) {
+			throw new IOException("HTTP " + response.statusCode() + " for " + listUrl);
+		}
+
+		for (String line : response.body().split("\n")) {
+			// Lines look like: "<64 hex chars>  ffmpeg-....zip"; some tools prefix the name with '*'.
+			String trimmed = line.strip();
+			int sp = trimmed.indexOf(' ');
+			if (sp <= 0) {
+				continue;
+			}
+			String file = trimmed.substring(sp + 1).strip();
+			if (file.startsWith("*")) {
+				file = file.substring(1);
+			}
+			if (file.equals(name)) {
+				return trimmed.substring(0, sp);
+			}
+		}
+		throw new IOException(listUrl + " has no entry for " + name);
+	}
+
+	private String download(String url, Path dest, long approxBytes) throws IOException, InterruptedException {
+		HttpClient client = httpClient();
+		HttpRequest request = request(url, Duration.ofMinutes(30)).build();
 
 		HttpResponse<InputStream> response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
 		if (response.statusCode() != 200) {

@@ -2,7 +2,7 @@
 
 > **Instant replay for Minecraft.** Save the last 5 seconds to 10 minutes of your gameplay with a single keypress - no OBS, no Medal, no ShadowPlay, no account.
 
-[![Fabric](https://cdn.jsdelivr.net/npm/@intergrav/devins-badges@3/assets/compact/supported/fabric_vector.svg)](https://fabricmc.net/) [![Modrinth](https://cdn.jsdelivr.net/npm/@intergrav/devins-badges@3/assets/compact/available/modrinth_vector.svg)](https://modrinth.com/mod/clipify) [![Discord](https://cdn.jsdelivr.net/npm/@intergrav/devins-badges@3/assets/compact/social/discord-plural_vector.svg)](https://discord.gg/g3a7pZTU9F)
+[![Fabric](https://cdn.jsdelivr.net/npm/@intergrav/devins-badges@3/assets/compact/supported/fabric_vector.svg)](https://fabricmc.net/) [![Modrinth](https://cdn.jsdelivr.net/npm/@intergrav/devins-badges@3/assets/compact/available/modrinth_vector.svg)](https://modrinth.com/mod/clipify) [![Discord](https://cdn.jsdelivr.net/npm/@intergrav/devins-badges@3/assets/compact/social/discord-plural_vector.svg)](https://discord.gg/jAXF5vARYm)
 
 Clipify is a Medal-like instant replay mod for Minecraft. Save your recent gameplay as an MP4 with one keybind, manage and trim clips in-game, and optionally upload them for easy sharing.
 

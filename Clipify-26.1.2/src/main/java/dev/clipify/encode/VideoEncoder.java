@@ -109,8 +109,19 @@ public final class VideoEncoder {
 	 */
 	public List<String> arguments(int bitrateKbps, int gopFrames, int segmentSeconds) {
 		List<String> args = new ArrayList<>();
+
+		// Cap FFmpeg's worker threads. Left alone it sizes its pools from the core count, and a
+		// background recorder that spins up a thread per core spends its life preempting the game it
+		// is recording. Half the machine is far more than enough to keep up with the capture rate.
+		String threads = Integer.toString(encodeThreads());
+		args.addAll(List.of("-threads", threads, "-filter_threads", threads));
+
 		args.add("-c:v");
 		args.add(codec);
+
+		// Hardware encoders take NV12 natively; asking for yuv420p makes them convert a second time
+		// after FFmpeg has already converted once.
+		String pixelFormat = hardware ? "nv12" : "yuv420p";
 
 		switch (codec) {
 			case "h264_nvenc" -> {
@@ -128,7 +139,7 @@ public final class VideoEncoder {
 		}
 
 		args.addAll(List.of(
-				"-pix_fmt", "yuv420p",
+				"-pix_fmt", pixelFormat,
 				"-b:v", bitrateKbps + "k",
 				"-maxrate", bitrateKbps + "k",
 				"-bufsize", (bitrateKbps * 2) + "k",
@@ -137,5 +148,18 @@ public final class VideoEncoder {
 				// concat-and-copy produce a seekable, playable MP4 with no re-encoding.
 				"-force_key_frames", "expr:gte(t,n_forced*" + segmentSeconds + ")"));
 		return args;
+	}
+
+	/**
+	 * Worker threads FFmpeg may use. A hardware encoder only needs enough to feed it, so it is held
+	 * to a couple; software encoding genuinely needs cores, but never more than half the machine —
+	 * the other half belongs to Minecraft.
+	 */
+	int encodeThreads() {
+		int cores = Runtime.getRuntime().availableProcessors();
+		if (hardware) {
+			return Math.max(2, Math.min(4, cores / 4));
+		}
+		return Math.max(2, Math.min(8, cores / 2));
 	}
 }

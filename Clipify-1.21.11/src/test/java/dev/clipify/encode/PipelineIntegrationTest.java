@@ -49,7 +49,7 @@ class PipelineIntegrationTest {
 		FramePool pool = new FramePool(frameBytes, 6);
 		SegmentRecorder recorder = new SegmentRecorder(
 				ffmpeg, segmentsDir, WIDTH, HEIGHT, FPS, SEGMENT_SECONDS, WRAP, 3000,
-				VideoEncoder.SOFTWARE, pool);
+				VideoEncoder.SOFTWARE);
 
 		assertTrue(recorder.start(), "recorder should start");
 		try {
@@ -98,7 +98,7 @@ class PipelineIntegrationTest {
 		FramePool pool = new FramePool(frameBytes, 6);
 		SegmentRecorder recorder = new SegmentRecorder(
 				ffmpeg, tempDir.resolve("segments"), WIDTH, HEIGHT, FPS, SEGMENT_SECONDS, WRAP, 3000,
-				VideoEncoder.SOFTWARE, pool);
+				VideoEncoder.SOFTWARE);
 
 		assertTrue(recorder.start(), "recorder should start");
 		try {
@@ -138,11 +138,11 @@ class PipelineIntegrationTest {
 		// makes any frame ordering bug visible in the output.
 		long start = System.nanoTime();
 		for (int i = 0; i < totalFrames; i++) {
-			ByteBuffer buf = pool.acquire();
+			final ByteBuffer buf = pool.acquire();
 			if (buf != null) {
 				fill(buf, frameBytes, (byte) (i * 4), (byte) (i * 2), (byte) i);
 				long ts = start + (long) i * 1_000_000_000L / FPS;
-				recorder.offer(new CapturedFrame(buf, ts));
+				recorder.offer(new CapturedFrame(buf, ts, () -> pool.release(buf)));
 			}
 			sleepUntil(start + (long) (i + 1) * 1_000_000_000L / FPS);
 		}
