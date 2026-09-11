@@ -9,6 +9,9 @@
      Still to fill in: IMAGE_1 … IMAGE_9 — your own GIFs/screenshots. The comment above each one is
      the shot note from that media slot on the page. Comments do not render. -->
 
+![alt text](https://raw.githubusercontent.com/itamarb2010-jpg/Clipify/main/curseforge-assets/hero1.png) ![alt text](https://raw.githubusercontent.com/itamarb2010-jpg/Clipify/main/curseforge-assets/hero2.png) ![alt text](https://raw.githubusercontent.com/itamarb2010-jpg/Clipify/main/curseforge-assets/hero3.png)
+
+
 <p align="center"><img width="820" src="https://raw.githubusercontent.com/itamarb2010-jpg/Clipify/main/curseforge-assets/band-1-hero.png" alt="Save what just happened. Edit it in Minecraft. Share it instantly. Clipping, built into Minecraft — never miss a Minecraft moment. Clipify keeps the last few seconds, or the last ten minutes, ready to save. No separate recorder. No account. Just press your key."></p>
 
 <!-- IMAGE_1 · hero action moment · 16:9 · 4–6 sec · loop
