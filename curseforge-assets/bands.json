@@ -1,0 +1,57 @@
+[
+  {
+    "name": "band-1-hero",
+    "css": "820x712",
+    "px": "1640x1424"
+  },
+  {
+    "name": "band-2-replay",
+    "css": "820x309",
+    "px": "1640x618"
+  },
+  {
+    "name": "band-3-clips",
+    "css": "820x342",
+    "px": "1640x684"
+  },
+  {
+    "name": "band-4-audio",
+    "css": "820x247",
+    "px": "1640x494"
+  },
+  {
+    "name": "band-5a-sharing-head",
+    "css": "820x278",
+    "px": "1640x556"
+  },
+  {
+    "name": "band-5b-sharing-copy",
+    "css": "820x279",
+    "px": "1640x558"
+  },
+  {
+    "name": "band-6a-features-top",
+    "css": "820x436",
+    "px": "1640x872"
+  },
+  {
+    "name": "band-6b-features-bottom",
+    "css": "820x265",
+    "px": "1640x530"
+  },
+  {
+    "name": "band-7-comparison",
+    "css": "820x580",
+    "px": "1640x1160"
+  },
+  {
+    "name": "band-8-faq",
+    "css": "820x569",
+    "px": "1640x1138"
+  },
+  {
+    "name": "band-9-cta",
+    "css": "820x330",
+    "px": "1640x660"
+  }
+]
