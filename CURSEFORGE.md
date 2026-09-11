@@ -83,4 +83,4 @@
 
 <br>
 
-<p align="center"><img width="820" src="https://raw.githubusercontent.com/itamarb2010-jpg/Clipify/main/curseforge-assets/band-9-cta.png" alt="The moment only happens once. Keep it. Fabric · Client-side · Windows / macOS / Linux"></p>
+<p align="center"><img width="820" src="https://raw.githubusercontent.com/itamarb2010-jpg/Clipify/main/curseforge-assets/bottom.png" alt="The moment only happens once. Keep it. Fabric · Client-side · Windows / macOS / Linux"></p>
