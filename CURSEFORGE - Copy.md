@@ -1,6 +1,6 @@
 ![alt text](https://raw.githubusercontent.com/itamarb2010-jpg/Clipify/main/curseforge-assets/hero.png)
 
-![alt text](https://raw.githubusercontent.com/itamarb2010-jpg/Clipify/main/curseforge-assets/title.png)
+![alt text](https://github.com/itamarb2010-jpg/Clipify/blob/main/curseforge-assets/title.png)
 
 ![alt text](https://raw.githubusercontent.com/itamarb2010-jpg/Clipify/main/curseforge-assets/faq.png)
 **Does Clipify need a separate app or account?**<br>
