@@ -1,7 +1,14 @@
 ![alt text](https://raw.githubusercontent.com/itamarb2010-jpg/Clipify/main/curseforge-assets/hero.png)
-
+<br><br><br><br><br>
 ![alt text](https://raw.githubusercontent.com/itamarb2010-jpg/Clipify/main/curseforge-assets/title.png)
-
+<br><br><br>
+![alt text](https://raw.githubusercontent.com/itamarb2010-jpg/Clipify/main/curseforge-assets/editor.png)<br>
+**YOUR CLIPS. READY TO CUT.**<br>
+Search, rename, preview, trim, duplicate, overwrite, open, or delete clips without leaving Minecraft.
+<br><br><br>
+![alt text]()<br>
+**BUILT AROUND YOU.**<br>
+Create clip hotkeys with different replay lengths, then choose a quality preset or fine-tune your resolution, frame rate, bitrate, and encoder.           
 ![alt text](https://raw.githubusercontent.com/itamarb2010-jpg/Clipify/main/curseforge-assets/faq.png)
 **Does Clipify need a separate app or account?**<br>
 No. Clipify runs inside Minecraft - no separate desktop app and no account required.
