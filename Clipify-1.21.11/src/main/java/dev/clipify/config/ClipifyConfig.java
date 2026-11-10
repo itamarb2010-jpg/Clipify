@@ -187,6 +187,14 @@ public final class ClipifyConfig {
 	 */
 	public boolean allowFfmpegDownload = true;
 
+	/**
+	 * The player's answer to "download FFmpeg?" for THIS instance (the config lives in the instance's
+	 * config folder): {@code "ask"} until they answer on the consent screen, then {@code "allowed"} or
+	 * {@code "declined"}. Nothing is downloaded before {@code "allowed"} — Modrinth requires informed
+	 * consent for every download.
+	 */
+	public String ffmpegDownloadConsent = "ask";
+
 	public enum EncoderPreference {
 		AUTO,
 		SOFTWARE,
@@ -254,6 +262,9 @@ public final class ClipifyConfig {
 	/** Clamps every field into a supported range. Returns {@code this} for chaining. */
 	public ClipifyConfig validated() {
 		validateHotkeys();
+		if (!"allowed".equals(ffmpegDownloadConsent) && !"declined".equals(ffmpegDownloadConsent)) {
+			ffmpegDownloadConsent = "ask";
+		}
 		fps = clamp(fps, FPS_MIN, FPS_MAX);
 		if (codec == null) {
 			codec = VideoCodec.H264;

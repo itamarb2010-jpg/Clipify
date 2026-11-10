@@ -96,6 +96,50 @@ public final class FfmpegProvider {
 		this.binDir = gameDir.resolve("clipify").resolve("bin");
 	}
 
+	/**
+	 * Looks for an FFmpeg that is already here — Clipify's own bin folder, then PATH — without
+	 * downloading anything. Leaves the state IDLE when there is none.
+	 */
+	public boolean findExisting() {
+		state.set(State.SEARCHING);
+		Path local = binDir.resolve(executableName());
+		if (isWorkingFfmpeg(local)) {
+			return succeed(local);
+		}
+		Path onPath = findOnPath();
+		if (onPath != null) {
+			ClipifyLog.LOGGER.info("Using FFmpeg found on PATH: {}", onPath);
+			return succeed(onPath);
+		}
+		state.set(State.IDLE);
+		return false;
+	}
+
+	/** Where a downloaded (or hand-placed) FFmpeg lives: {@code <instance>/clipify/bin}. */
+	public Path binDir() {
+		return binDir;
+	}
+
+	/** Size of the download for this platform in MB, or 0 when there is no build for it. */
+	public static long downloadMegabytes() {
+		List<Build> builds = pinnedBuilds();
+		return builds.isEmpty() ? 0 : Math.round(builds.get(0).approxBytes() / 1_000_000.0);
+	}
+
+	/** Where the download comes from, for the consent screen (e.g. "github.com/BtbN/FFmpeg-Builds"). */
+	public static String downloadSource() {
+		List<Build> builds = pinnedBuilds();
+		if (builds.isEmpty()) {
+			return "";
+		}
+		String url = builds.get(0).url();
+		if (url.contains("github.com/BtbN/FFmpeg-Builds")) {
+			return "github.com/BtbN/FFmpeg-Builds";
+		}
+		String rest = url.substring(url.indexOf("://") + 3);
+		return rest.substring(0, rest.indexOf('/'));
+	}
+
 	public State state() {
 		return state.get();
 	}

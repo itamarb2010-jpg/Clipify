@@ -54,6 +54,13 @@ public final class ClipEditScreen extends Screen {
 	private boolean fullscreen;
 	private boolean fsSeeking;
 
+	// Volume: a gain (1 = as recorded, up to 2 = double) that the preview plays at and the save writes.
+	private static final double MAX_VOLUME = 2.0;
+	private double volume = 1.0;
+	private double volumeBeforeMute = 1.0;
+	private boolean muted;
+	private boolean volDragging;
+
 	private volatile String status = "";
 	private volatile boolean busy;
 	private boolean confirmingDelete;
@@ -66,6 +73,7 @@ public final class ClipEditScreen extends Screen {
 	private int toolTop;
 	private int playX, playY, playSize;
 	private int skipStartX, skipEndX, transIconY, skipSize, expandX;
+	private int volIconX, volSliderX, volSliderW;
 
 	private final List<IconBtn> iconButtons = new ArrayList<>();
 
@@ -108,6 +116,12 @@ public final class ClipEditScreen extends Screen {
 		skipStartX = playX - gap - skipSize;
 		skipEndX = playX + playSize + gap;
 		expandX = previewLeft + previewW - skipSize;
+		// Volume sits left of the fullscreen button, YouTube-style. On a very narrow preview the
+		// slider would run into the skip button, so only the speaker icon stays (click/scroll still work).
+		int room = previewW / 2 - (skipSize + gap + playSize / 2) - 12 - (skipSize + 4 + 10 + skipSize);
+		volSliderW = room >= 24 ? Math.min(56, room) : 0;
+		volSliderX = expandX - 10 - volSliderW;
+		volIconX = volSliderX - (volSliderW > 0 ? 4 : 0) - skipSize;
 
 		rulerY = transY + playSize + 12;
 		timelineLeft = previewLeft;
@@ -163,6 +177,7 @@ public final class ClipEditScreen extends Screen {
 		if (duration > 0 && player == null && ffmpeg() != null) {
 			player = new VideoPlayer(this.minecraft, ffmpeg(), file, duration);
 			strip = new Filmstrip(this.minecraft, ffmpeg(), file, duration, 20);
+			player.setVolume((float) effectiveVolume());
 		}
 	}
 
@@ -226,7 +241,7 @@ public final class ClipEditScreen extends Screen {
 			return;
 		}
 		busy = true;
-		status = "Trimming…";
+		status = "Saving…";
 		if (overwrite) {
 			// The preview decoder reads this very file and FFmpeg keeps its input open without
 			// FILE_SHARE_DELETE, so on Windows the finished trim could not be moved over the
@@ -238,22 +253,25 @@ public final class ClipEditScreen extends Screen {
 		rebuildWidgets();
 		double s = start;
 		double e = end;
+		double vol = effectiveVolume();
 		Thread t = new Thread(() -> {
 			Path dir = file.getParent();
 			Path tmp = overwrite ? dir.resolve(file.getFileName().toString() + ".trim.tmp.mp4") : null;
 			try {
 				if (overwrite) {
-					ClipLibrary.trim(ff, file, s, e, tmp);
+					ClipLibrary.trim(ff, file, s, e, vol, tmp);
 					ClipLibrary.replace(tmp, file);
 					ReplayBufferService svc = Clipify.service();
 					if (svc != null) {
 						svc.forgetLink(file);
 					}
+					// The new volume is now part of the file, so the slider starts over at 100%.
+					this.minecraft.execute(this::resetVolume);
 					finishTrim("Saved (overwritten).");
 				} else {
 					Path dest = ClipLibrary.newClipPath(dir, "-trim");
-					ClipLibrary.trim(ff, file, s, e, dest);
-					finishTrim("Saved a trimmed copy.");
+					ClipLibrary.trim(ff, file, s, e, vol, dest);
+					finishTrim("Saved a copy.");
 				}
 			} catch (Exception ex) {
 				ClipifyLog.LOGGER.error("Clipify: saving the trimmed clip failed", ex);
@@ -345,6 +363,75 @@ public final class ClipEditScreen extends Screen {
 		return this.width - 48;
 	}
 
+	private static final int FS_VOL_W = 60;
+
+	private int fsVolSliderX() {
+		return this.width - 24 - 18 - 14 - FS_VOL_W;
+	}
+
+	private int fsVolIconX() {
+		return fsVolSliderX() - 6 - 18;
+	}
+
+	// ---------------------------------------------------------------------- volume
+
+	private double effectiveVolume() {
+		return muted ? 0.0 : volume;
+	}
+
+	private void pushVolume() {
+		if (player != null) {
+			player.setVolume((float) effectiveVolume());
+		}
+	}
+
+	private void resetVolume() {
+		volume = 1.0;
+		volumeBeforeMute = 1.0;
+		muted = false;
+		pushVolume();
+	}
+
+	/** Speaker click: mute, or bring back the level from before (100% if it was dragged to zero). */
+	private void toggleMute() {
+		if (muted || volume <= 0.0) {
+			muted = false;
+			if (volume <= 0.0) {
+				volume = volumeBeforeMute > 0.0 ? volumeBeforeMute : 1.0;
+			}
+		} else {
+			muted = true;
+			volumeBeforeMute = volume;
+		}
+		pushVolume();
+	}
+
+	private void setVolume(double v) {
+		v = clamp(v, 0.0, MAX_VOLUME);
+		if (Math.abs(v - 1.0) < 0.04) {
+			v = 1.0; // a small detent at "as recorded", so it is easy to get back to
+		}
+		volume = v;
+		muted = false;
+		if (v > 0.0) {
+			volumeBeforeMute = v;
+		}
+		pushVolume();
+	}
+
+	private void setVolumeFromX(double mx, int sliderX, int sliderW) {
+		setVolume((mx - sliderX) / (double) sliderW * MAX_VOLUME);
+	}
+
+	private boolean overVolSlider(double mx, double my, int sliderX, int sliderW, int centreY) {
+		return sliderW > 0 && my >= centreY - 8 && my <= centreY + 8 && mx >= sliderX - 4 && mx <= sliderX + sliderW + 4;
+	}
+
+	private void beginVolumeDrag(double mx, int sliderX, int sliderW) {
+		volDragging = true;
+		setVolumeFromX(mx, sliderX, sliderW);
+	}
+
 	@Override
 	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
 		if (event.button() != 0) {
@@ -363,6 +450,14 @@ public final class ClipEditScreen extends Screen {
 				if (player != null) {
 					player.togglePlay();
 				}
+				return true;
+			}
+			if (in(mx, my, fsVolIconX(), this.height - 32, 18, 18)) {
+				toggleMute();
+				return true;
+			}
+			if (overVolSlider(mx, my, fsVolSliderX(), FS_VOL_W, this.height - 23)) {
+				beginVolumeDrag(mx, fsVolSliderX(), FS_VOL_W);
 				return true;
 			}
 			if (duration > 0 && my >= fsBarY() - 6 && my <= fsBarY() + 8
@@ -384,6 +479,14 @@ public final class ClipEditScreen extends Screen {
 		}
 		if (in(mx, my, expandX, transIconY, skipSize, skipSize)) {
 			fullscreen = true;
+			return true;
+		}
+		if (in(mx, my, volIconX, transIconY, skipSize, skipSize)) {
+			toggleMute();
+			return true;
+		}
+		if (overVolSlider(mx, my, volSliderX, volSliderW, transIconY + skipSize / 2)) {
+			beginVolumeDrag(mx, volSliderX, volSliderW);
 			return true;
 		}
 		if (player != null && in(mx, my, skipStartX, transIconY, skipSize, skipSize)) {
@@ -410,6 +513,14 @@ public final class ClipEditScreen extends Screen {
 	@Override
 	public boolean mouseDragged(MouseButtonEvent event, double dragX, double dragY) {
 		if (event.button() == 0) {
+			if (volDragging) {
+				if (fullscreen) {
+					setVolumeFromX(event.x(), fsVolSliderX(), FS_VOL_W);
+				} else {
+					setVolumeFromX(event.x(), volSliderX, volSliderW);
+				}
+				return true;
+			}
 			if (fsSeeking) {
 				fsSeekTo(event.x());
 				return true;
@@ -424,12 +535,25 @@ public final class ClipEditScreen extends Screen {
 
 	@Override
 	public boolean mouseReleased(MouseButtonEvent event) {
-		if (event.button() == 0 && (grab != Grab.NONE || fsSeeking)) {
+		if (event.button() == 0 && (grab != Grab.NONE || fsSeeking || volDragging)) {
 			grab = Grab.NONE;
 			fsSeeking = false;
+			volDragging = false;
 			return true;
 		}
 		return super.mouseReleased(event);
+	}
+
+	@Override
+	public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+		boolean overVolume = fullscreen
+				? mouseY >= this.height - 34 && mouseX >= fsVolIconX() - 4 && mouseX <= fsVolSliderX() + FS_VOL_W + 4
+				: in(mouseX, mouseY, volIconX - 4, transIconY - 4, volSliderX + volSliderW - volIconX + 8, skipSize + 8);
+		if (overVolume && verticalAmount != 0) {
+			setVolume(effectiveVolume() + Math.signum(verticalAmount) * 0.1);
+			return true;
+		}
+		return super.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
 	}
 
 	@Override
@@ -546,6 +670,8 @@ public final class ClipEditScreen extends Screen {
 		int cX = this.width - 24 - 18;
 		boolean ch = in(mouseX, mouseY, cX, this.height - 32, 18, 18);
 		icon(graphics, "expand", cX, this.height - 32, 18, ch ? 0xFFFFFFFF : MUTED);
+		renderVolume(graphics, mouseX, mouseY, fsVolIconX(), this.height - 32, 18, fsVolSliderX(), FS_VOL_W,
+				this.height - 23, 0xFFFFFFFF);
 	}
 
 	private void renderPreview(GuiGraphicsExtractor graphics) {
@@ -595,6 +721,37 @@ public final class ClipEditScreen extends Screen {
 		graphics.text(this.font, Component.literal(time), previewLeft, transY + (playSize - 8) / 2, MUTED, true);
 		boolean eh = in(mouseX, mouseY, expandX, transIconY, skipSize, skipSize);
 		icon(graphics, "expand", expandX, transIconY, skipSize, eh ? TEXT : MUTED);
+		renderVolume(graphics, mouseX, mouseY, volIconX, transIconY, skipSize, volSliderX, volSliderW,
+				transIconY + skipSize / 2, TEXT);
+	}
+
+	/** Speaker icon + YouTube-style level slider; the bubble shows the exact percentage while it's used. */
+	private void renderVolume(GuiGraphicsExtractor graphics, int mouseX, int mouseY, int iconX, int iconY, int iconSize,
+							  int sliderX, int sliderW, int centreY, int hoverColor) {
+		double v = effectiveVolume();
+		boolean ih = in(mouseX, mouseY, iconX, iconY, iconSize, iconSize);
+		icon(graphics, v <= 0.0 ? "volume_off" : "volume", iconX, iconY, iconSize, ih ? hoverColor : MUTED);
+		if (sliderW <= 0) {
+			if (ih) {
+				drawTimeBubble(graphics, iconX + iconSize / 2, iconY - 4, percent(v));
+			}
+			return;
+		}
+		int ty = centreY - 1;
+		graphics.fill(sliderX, ty, sliderX + sliderW, ty + 3, 0xFF3A3D46);
+		int kx = sliderX + (int) Math.round(clamp(v / MAX_VOLUME, 0, 1) * sliderW);
+		graphics.fill(sliderX, ty, kx, ty + 3, 0xFFD0D4DC);
+		int mid = sliderX + sliderW / 2; // 100% = as recorded
+		graphics.fill(mid, ty - 2, mid + 1, ty + 5, 0xFF70747E);
+		boolean sh = overVolSlider(mouseX, mouseY, sliderX, sliderW, centreY);
+		roundRect(graphics, kx - 3, centreY - 4, 6, 8, 2, sh || volDragging ? 0xFFFFFFFF : HANDLE);
+		if (volDragging || sh || ih) {
+			drawTimeBubble(graphics, kx, centreY - 7, percent(v));
+		}
+	}
+
+	private static String percent(double v) {
+		return v <= 0.0 ? "Muted" : Math.round(v * 100) + "%";
 	}
 
 	private void renderRuler(GuiGraphicsExtractor graphics) {

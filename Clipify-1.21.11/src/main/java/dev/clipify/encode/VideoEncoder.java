@@ -107,8 +107,9 @@ public final class VideoEncoder {
 	 * lookahead) because frames must reach the segment files promptly for the replay buffer to be
 	 * accurate, and for a bounded bitrate so the on-disk ring stays predictable.
 	 */
-	public List<String> arguments(int bitrateKbps, int gopFrames, int segmentSeconds) {
+	public List<String> arguments(int bitrateKbps, int fps, int segmentSeconds) {
 		List<String> args = new ArrayList<>();
+		int gopFrames = fps * segmentSeconds;
 
 		// Cap FFmpeg's worker threads. Left alone it sizes its pools from the core count, and a
 		// background recorder that spins up a thread per core spends its life preempting the game it
@@ -122,6 +123,11 @@ public final class VideoEncoder {
 		// Hardware encoders take NV12 natively; asking for yuv420p makes them convert a second time
 		// after FFmpeg has already converted once.
 		String pixelFormat = hardware ? "nv12" : "yuv420p";
+
+		// The recorder marks timeline slots it has no frame for; the fps filter turns each of those
+		// into a repeat of the previous picture. It sits after the format conversion on purpose, so
+		// a repeat costs the encoder one unchanged frame and nothing else.
+		args.addAll(List.of("-vf", "format=" + pixelFormat + ",fps=" + fps));
 
 		switch (codec) {
 			case "h264_nvenc" -> {

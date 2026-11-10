@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -31,6 +32,16 @@ import java.util.concurrent.atomic.AtomicLong;
  * {@code bitrate * (duration + 2s)} regardless of how long the session runs. Saving a clip is then
  * just a stream copy of the trailing segments, which is why it is near-instant and why encoding
  * never has to stop.
+ *
+ * <p><b>Falling behind.</b> The output is constant frame rate, so every slot of the timeline has to
+ * be accounted for whether or not a frame was captured for it. Frames travel to FFmpeg as an AVI
+ * stream precisely because AVI can say "nothing new in this slot" with an empty eight-byte chunk,
+ * which FFmpeg turns into a repeat of the previous picture on its own side of the pipe. A missed
+ * slot used to be filled by pushing the whole previous frame through the pipe again; on a machine
+ * that could not move the full frame rate that made every missed frame cost as much as a real one,
+ * so the repeats crowded out the frames they were standing in for and a clip collapsed to a few
+ * pictures a second. Now a PC that can only carry half the frames records half the frames, and the
+ * clip still runs in real time.
  */
 public final class SegmentRecorder {
 
@@ -41,7 +52,7 @@ public final class SegmentRecorder {
 	 */
 	private static final int QUEUE_CAPACITY = 4;
 	private static final int WRITE_CHUNK = 1024 * 1024;
-	/** Longest run of duplicated frames we will emit to cover a stall before resynchronising. */
+	/** Longest gap, in seconds, that is filled with repeats of the last frame before resynchronising. */
 	private static final int MAX_DUPLICATE_FRAMES_FACTOR = 2;
 
 	public record Layout(Path directory, Path listFile, String pattern, int wrap, int segmentSeconds) {}
@@ -69,6 +80,7 @@ public final class SegmentRecorder {
 	private final AtomicLong framesWritten = new AtomicLong();
 	private final AtomicLong framesDuplicated = new AtomicLong();
 	private final AtomicLong framesDroppedQueueFull = new AtomicLong();
+	private final AtomicLong timelineResyncs = new AtomicLong();
 	private final Deque<String> recentLog = new ArrayDeque<>();
 
 	private volatile Process process;
@@ -128,13 +140,14 @@ public final class SegmentRecorder {
 		List<String> cmd = new ArrayList<>(List.of(
 				ffmpeg.toAbsolutePath().toString(),
 				"-hide_banner", "-loglevel", "warning", "-nostdin",
-				"-f", "rawvideo",
-				"-pix_fmt", "bgra",
-				"-s", width + "x" + height,
-				"-framerate", Integer.toString(fps),
+				// The stream header states the size, pixel format and rate outright, so FFmpeg has
+				// nothing to measure — do not let it sit on the first frames trying to.
+				"-fpsprobesize", "0",
+				"-analyzeduration", "0",
+				"-f", "avi",
 				"-i", "pipe:0",
 				"-an"));
-		cmd.addAll(encoder.arguments(bitrateKbps, fps * segmentSeconds, segmentSeconds));
+		cmd.addAll(encoder.arguments(bitrateKbps, fps, segmentSeconds));
 		cmd.addAll(List.of(
 				"-f", "segment",
 				"-segment_time", Integer.toString(segmentSeconds),
@@ -218,12 +231,13 @@ public final class SegmentRecorder {
 		Process p = process;
 		OutputStream out = p.getOutputStream();
 		byte[] scratch = new byte[WRITE_CHUNK];
-		CapturedFrame retained = null;
 		long originNanos = Long.MIN_VALUE;
 		long lastIndex = -1L;
 		int maxDuplicates = fps * MAX_DUPLICATE_FRAMES_FACTOR;
 
 		try {
+			out.write(streamHeader());
+			out.flush();
 			while (running.get() || !queue.isEmpty()) {
 				CapturedFrame frame = queue.poll(100, TimeUnit.MILLISECONDS);
 				if (frame == null) {
@@ -233,30 +247,37 @@ public final class SegmentRecorder {
 					continue;
 				}
 
-				// Map the wall-clock capture time onto a constant-frame-rate timeline so the clip
-				// plays back at real speed even though Minecraft's frame rate fluctuates. A long
-				// stall (world load, alt-tab, window drag) rebases the timeline instead of emitting
-				// a flood of duplicate frames.
-				CaptureMath.Step step = CaptureMath.nextFrame(
-						originNanos, lastIndex, frame.captureNanos(), fps, maxDuplicates);
-				originNanos = step.originNanos();
-				timelineOriginNanos.set(originNanos);
+				try {
+					// Map the wall-clock capture time onto a constant-frame-rate timeline so the
+					// clip plays back at real speed even though Minecraft's frame rate fluctuates. A
+					// long stall (world load, alt-tab, window drag) rebases the timeline instead of
+					// asking for a flood of repeated frames.
+					CaptureMath.Step step = CaptureMath.nextFrame(
+							originNanos, lastIndex, frame.captureNanos(), fps, maxDuplicates);
+					if (originNanos != Long.MIN_VALUE && step.originNanos() != originNanos) {
+						timelineResyncs.incrementAndGet();
+					}
+					originNanos = step.originNanos();
+					timelineOriginNanos.set(originNanos);
 
-				for (long i = 0; i < step.duplicates() && retained != null; i++) {
-					writeFrame(out, retained.pixels(), scratch);
-					framesDuplicated.incrementAndGet();
+					// Slots nothing was captured for cost eight bytes each, not a frame: FFmpeg
+					// repeats the previous picture for them once they are past the pipe.
+					if (step.duplicates() > 0) {
+						writeEmptySlots(out, step.duplicates(), scratch);
+						framesDuplicated.addAndGet(step.duplicates());
+					}
+					lastIndex = step.targetIndex();
+
+					writeFrame(out, frame.pixels(), scratch);
+					// The tail of a frame is smaller than the stream's own buffer and would otherwise
+					// sit in it until the next frame arrived.
+					out.flush();
+					framesWritten.incrementAndGet();
+				} finally {
+					// Nothing is held back for repeats any more, so the readback slot goes straight
+					// home.
+					frame.release();
 				}
-				lastIndex = step.targetIndex();
-
-				writeFrame(out, frame.pixels(), scratch);
-				framesWritten.incrementAndGet();
-
-				// Keep this frame around so the next gap can be filled by repeating it. Holding it
-				// also holds its readback slot, which is why the ring carries spares.
-				if (retained != null) {
-					retained.release();
-				}
-				retained = frame;
 			}
 		} catch (InterruptedException e) {
 			Thread.currentThread().interrupt();
@@ -266,9 +287,6 @@ public final class SegmentRecorder {
 				ClipifyLog.LOGGER.error("Replay buffer writer failed", e);
 			}
 		} finally {
-			if (retained != null) {
-				retained.release();
-			}
 			drainQueueToPool();
 			try {
 				out.close();
@@ -278,16 +296,103 @@ public final class SegmentRecorder {
 		}
 	}
 
+	/** Bytes in an AVI chunk header: a four-character tag and a little-endian length. */
+	private static final int CHUNK_HEADER = 8;
+
+	/**
+	 * Writes one frame as an uncompressed-video chunk. BGRA frames are always a multiple of four
+	 * bytes, so the chunk never needs AVI's odd-length padding byte.
+	 */
 	private static void writeFrame(OutputStream out, ByteBuffer buf, byte[] scratch) throws IOException {
 		buf.position(0);
 		int remaining = buf.limit();
+		int filled = putChunkHeader(scratch, 0, remaining);
 		while (remaining > 0) {
-			int n = Math.min(scratch.length, remaining);
-			buf.get(scratch, 0, n);
-			out.write(scratch, 0, n);
+			int n = Math.min(scratch.length - filled, remaining);
+			buf.get(scratch, filled, n);
+			out.write(scratch, 0, filled + n);
 			remaining -= n;
+			filled = 0;
 		}
 		buf.position(0);
+	}
+
+	/** Writes {@code count} zero-length chunks: timeline slots that repeat the previous picture. */
+	private static void writeEmptySlots(OutputStream out, long count, byte[] scratch) throws IOException {
+		long left = count;
+		while (left > 0) {
+			int batch = (int) Math.min(left, scratch.length / CHUNK_HEADER);
+			for (int i = 0; i < batch; i++) {
+				putChunkHeader(scratch, i * CHUNK_HEADER, 0);
+			}
+			out.write(scratch, 0, batch * CHUNK_HEADER);
+			left -= batch;
+		}
+	}
+
+	/** @return the number of bytes written, always {@link #CHUNK_HEADER} */
+	private static int putChunkHeader(byte[] dst, int at, int length) {
+		dst[at] = '0';
+		dst[at + 1] = '0';
+		dst[at + 2] = 'd';
+		dst[at + 3] = 'b';
+		dst[at + 4] = (byte) length;
+		dst[at + 5] = (byte) (length >>> 8);
+		dst[at + 6] = (byte) (length >>> 16);
+		dst[at + 7] = (byte) (length >>> 24);
+		return CHUNK_HEADER;
+	}
+
+	/**
+	 * The preamble of the frame stream: an AVI header describing a single uncompressed BGRA video
+	 * stream at the output frame rate. The sizes a finished file would carry (RIFF, movi, frame
+	 * count) are left at zero, which is how a stream with no known end is written. The negative
+	 * height marks the rows as top-down, the order the grabber already delivers them in.
+	 */
+	private byte[] streamHeader() {
+		int frameBytes = width * height * 4;
+		ByteBuffer b = ByteBuffer.allocate(224).order(ByteOrder.LITTLE_ENDIAN);
+
+		b.put(ascii("RIFF")).putInt(0).put(ascii("AVI "));
+		b.put(ascii("LIST")).putInt(192).put(ascii("hdrl"));
+
+		b.put(ascii("avih")).putInt(56);
+		b.putInt(1_000_000 / fps);          // microseconds per frame
+		b.putInt(0).putInt(0).putInt(0);    // max bytes/sec, padding, flags
+		b.putInt(0).putInt(0);              // total frames (unknown), initial frames
+		b.putInt(1);                        // streams
+		b.putInt(frameBytes);               // suggested buffer size
+		b.putInt(width).putInt(height);
+		b.putInt(0).putInt(0).putInt(0).putInt(0);
+
+		b.put(ascii("LIST")).putInt(116).put(ascii("strl"));
+
+		b.put(ascii("strh")).putInt(56);
+		b.put(ascii("vids")).putInt(0);     // stream type, handler (none: uncompressed)
+		b.putInt(0);                        // flags
+		b.putShort((short) 0).putShort((short) 0); // priority, language
+		b.putInt(0);                        // initial frames
+		b.putInt(1).putInt(fps);            // scale, rate: fps frames per second
+		b.putInt(0).putInt(0);              // start, length (unknown)
+		b.putInt(frameBytes);               // suggested buffer size
+		b.putInt(-1);                       // quality: default
+		b.putInt(0);                        // sample size: varies
+		b.putShort((short) 0).putShort((short) 0).putShort((short) width).putShort((short) height);
+
+		b.put(ascii("strf")).putInt(40);
+		b.putInt(40);                       // BITMAPINFOHEADER size
+		b.putInt(width).putInt(-height);    // negative height: top-down rows
+		b.putShort((short) 1).putShort((short) 32); // planes, bits per pixel
+		b.putInt(0);                        // BI_RGB: uncompressed
+		b.putInt(frameBytes);
+		b.putInt(0).putInt(0).putInt(0).putInt(0);
+
+		b.put(ascii("LIST")).putInt(0).put(ascii("movi"));
+		return b.array();
+	}
+
+	private static byte[] ascii(String fourCc) {
+		return fourCc.getBytes(StandardCharsets.US_ASCII);
 	}
 
 	private void drainQueueToPool() {
@@ -364,8 +469,8 @@ public final class SegmentRecorder {
 			}
 		}
 		drainQueueToPool();
-		ClipifyLog.LOGGER.info("Replay buffer stopped ({} frames written, {} duplicated, {} dropped)",
-				framesWritten.get(), framesDuplicated.get(), framesDroppedQueueFull.get());
+		ClipifyLog.LOGGER.info("Replay buffer stopped ({} frames written, {} repeated, {} dropped, {} resyncs)",
+				framesWritten.get(), framesDuplicated.get(), framesDroppedQueueFull.get(), timelineResyncs.get());
 	}
 
 	private static void clearDirectory(Path dir) {
@@ -388,8 +493,14 @@ public final class SegmentRecorder {
 		return framesWritten.get();
 	}
 
+	/** Timeline slots that repeat the previous frame because nothing was captured for them. */
 	public long framesDuplicated() {
 		return framesDuplicated.get();
+	}
+
+	/** Times the timeline was rebased because a gap was too long to fill. */
+	public long timelineResyncs() {
+		return timelineResyncs.get();
 	}
 
 	public long framesDroppedQueueFull() {

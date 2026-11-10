@@ -114,6 +114,11 @@ public final class VideoPlayer {
 		return texture != null;
 	}
 
+	/** Preview loudness, the same gain the save will write: 1 = as recorded, 0 = silent, 2 = double. */
+	public void setVolume(float v) {
+		audio.setVolume(v);
+	}
+
 	/** True if the frame on screen is the one for {@code t} (within {@code tolerance} seconds). */
 	public boolean hasFrameNear(double t, double tolerance) {
 		return texture != null && !Double.isNaN(shownTime) && Math.abs(shownTime - t) <= tolerance;

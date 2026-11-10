@@ -13,6 +13,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -144,15 +145,31 @@ public final class ClipLibrary {
 	 * @throws IOException if FFmpeg fails
 	 */
 	public static void trim(Path ffmpeg, Path src, double start, double end, Path dest) throws IOException {
+		trim(ffmpeg, src, start, end, 1.0, dest);
+	}
+
+	/**
+	 * Trims and sets the loudness in one pass. {@code volume} is a gain (1 = as recorded, 2 = double);
+	 * 0 writes the clip with no audio track at all rather than a silent one.
+	 */
+	public static void trim(Path ffmpeg, Path src, double start, double end, double volume, Path dest) throws IOException {
 		double duration = end - start;
 		if (duration <= 0.05) {
 			throw new IOException("The trim range is empty.");
 		}
-		List<String> cmd = List.of(
+		List<String> cmd = new ArrayList<>(List.of(
 				ffmpeg.toString(), "-hide_banner", "-loglevel", "error", "-nostdin",
 				"-ss", format(start), "-i", src.toString(), "-t", format(duration),
-				"-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
-				"-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", "-y", dest.toString());
+				"-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p"));
+		if (volume <= 0.0) {
+			cmd.add("-an");
+		} else {
+			if (Math.abs(volume - 1.0) > 1.0e-3) {
+				cmd.addAll(List.of("-af", String.format(Locale.ROOT, "volume=%.3f", volume)));
+			}
+			cmd.addAll(List.of("-c:a", "aac", "-b:a", "160k"));
+		}
+		cmd.addAll(List.of("-movflags", "+faststart", "-y", dest.toString()));
 		try {
 			Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
 			String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);

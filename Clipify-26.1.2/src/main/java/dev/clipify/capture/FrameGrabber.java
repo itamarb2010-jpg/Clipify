@@ -53,7 +53,7 @@ public final class FrameGrabber {
 	/**
 	 * Depth of the PBO ring when frames are handed over by reference. Slots stay checked out until
 	 * the encoder thread has written them, so this has to cover the GPU's in-flight readbacks plus
-	 * the recorder's queue plus its retained duplicate-fill frame.
+	 * the recorder's queue plus the frame it is writing.
 	 */
 	private static final int SLOTS_ZERO_COPY = 8;
 	/** Depth when frames are copied out immediately; two spare frames is all the GPU needs. */
@@ -525,6 +525,15 @@ public final class FrameGrabber {
 	}
 
 	private void closeInternal() {
+		if (initialized) {
+			// The only place the skip count surfaces: it is what tells a slow readback or a slow
+			// encoder apart from a slow game when a clip comes out choppy.
+			ClipifyLog.LOGGER.info("Capture surface closed ({} frames captured, {} skipped with every readback slot busy, {} dropped with no buffer free)",
+					framesEmitted, framesSkippedGpuBusy, framesDroppedNoBuffer);
+			framesEmitted = 0;
+			framesSkippedGpuBusy = 0;
+			framesDroppedNoBuffer = 0;
+		}
 		for (int i = 0; i < fences.length; i++) {
 			if (fences[i] != 0L) {
 				GlStateManager._glDeleteSync(fences[i]);

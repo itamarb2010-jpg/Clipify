@@ -70,6 +70,11 @@ public final class ReplayBufferService {
 	private volatile VideoEncoder encoder;
 	private volatile ClipAssembler assembler;
 	private volatile String statusMessage = "Starting up";
+
+	/** FFmpeg isn't here and the player hasn't been asked yet whether to download it. */
+	private volatile boolean awaitingFfmpegConsent;
+	/** A clip was asked for while FFmpeg still needs the player's OK; Clipify's tick opens the screen. */
+	private volatile boolean consentScreenRequested;
 	private volatile boolean shuttingDown;
 	/** Path of the most recently saved clip, for the "Share last clip" action. */
 	private volatile Path lastSavedClip;
@@ -153,19 +158,72 @@ public final class ReplayBufferService {
 				return;
 			}
 
-			statusMessage = "Locating FFmpeg";
-			if (!ffmpegProvider.resolve(config.allowFfmpegDownload)) {
+			setUpFfmpeg();
+		});
+	}
+
+	/**
+	 * Worker thread. Uses an FFmpeg that is already here; downloads one only once the player has
+	 * agreed to it in this instance (the consent screen), never on its own.
+	 */
+	private void setUpFfmpeg() {
+		statusMessage = "Locating FFmpeg";
+		if (!ffmpegProvider.findExisting()) {
+			String consent = ffmpegConsent();
+			if (config.allowFfmpegDownload && "ask".equals(consent)) {
+				awaitingFfmpegConsent = true;
+				statusMessage = "Waiting for permission to download FFmpeg";
+				Clipify.LOGGER.info("FFmpeg isn't installed in this instance; asking the player before downloading it");
+				return;
+			}
+			if (!ffmpegProvider.resolve(config.allowFfmpegDownload && "allowed".equals(consent))) {
 				statusMessage = ffmpegProvider.errorMessage();
 				return;
 			}
+		}
 
-			statusMessage = "Selecting an encoder";
-			encoder = VideoEncoder.probe(ffmpegProvider.executable(), ffmpegProvider.encoderNames(), config.encoder);
-			assembler = new ClipAssembler(ffmpegProvider.executable());
-			watermarkPng = extractWatermark();
-			statusMessage = "Ready";
-			Clipify.LOGGER.info("Clipify ready — {}, clips go to {}", encoder, config.resolveOutputFolder());
-		});
+		statusMessage = "Selecting an encoder";
+		encoder = VideoEncoder.probe(ffmpegProvider.executable(), ffmpegProvider.encoderNames(), config.encoder);
+		assembler = new ClipAssembler(ffmpegProvider.executable());
+		watermarkPng = extractWatermark();
+		statusMessage = "Ready";
+		Clipify.LOGGER.info("Clipify ready — {}, clips go to {}", encoder, config.resolveOutputFolder());
+	}
+
+	private String ffmpegConsent() {
+		String c = config.ffmpegDownloadConsent;
+		return c == null ? "ask" : c;
+	}
+
+	/** FFmpeg is missing and the player hasn't answered the download question in this instance yet. */
+	public boolean awaitingFfmpegConsent() {
+		return awaitingFfmpegConsent;
+	}
+
+	/**
+	 * Recording can't start until the player OKs the FFmpeg download: not asked yet, or they said no
+	 * and FFmpeg still isn't here.
+	 */
+	public boolean ffmpegNeedsConsent() {
+		return awaitingFfmpegConsent
+				|| (config.allowFfmpegDownload && "declined".equals(ffmpegConsent())
+						&& ffmpegProvider.state() == FfmpegProvider.State.FAILED);
+	}
+
+	/** True once per clip request made while FFmpeg needed consent; the caller opens the screen. */
+	public boolean takeConsentScreenRequest() {
+		boolean r = consentScreenRequested;
+		consentScreenRequested = false;
+		return r;
+	}
+
+	/** Render thread: the player's answer on the consent screen, remembered for this instance. */
+	public void answerFfmpegConsent(boolean allow) {
+		config.ffmpegDownloadConsent = allow ? "allowed" : "declined";
+		config.save();
+		awaitingFfmpegConsent = false;
+		Clipify.LOGGER.info("FFmpeg download {} by the player", allow ? "allowed" : "declined");
+		worker.execute(this::setUpFfmpeg);
 	}
 
 	private boolean readyToRecord() {
@@ -418,6 +476,10 @@ public final class ReplayBufferService {
 	 * clip length can never ask for more than the ring actually holds.
 	 */
 	public void saveClip(int requestedSeconds) {
+		if (ffmpegNeedsConsent()) {
+			consentScreenRequested = true;
+			return;
+		}
 		if (!isBuffering() || recorder == null) {
 			Notifications.error(client, notReadyReason());
 			return;

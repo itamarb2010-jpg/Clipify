@@ -129,16 +129,90 @@ class PipelineIntegrationTest {
 		}
 	}
 
+	/**
+	 * The slow-PC contract: when only some frames reach the recorder, the clip loses frames, not
+	 * time. One frame in five is fed here — the rest stand in for captures a struggling encoder made
+	 * the grabber drop — and every picture that did get through has to hold the screen for exactly
+	 * the five slots it covers, so the clip still plays at real speed and stays in step with its
+	 * audio.
+	 */
+	@Test
+	void missedFramesAreRepeatedSoTheClipStaysRealTime(@TempDir Path tempDir) throws Exception {
+		Path ffmpeg = locateFfmpeg();
+		assumeTrue(ffmpeg != null, "No FFmpeg binary available; set -Dclipify.ffmpeg=<path> to run this test");
+
+		Path outputDir = tempDir.resolve("clips");
+		Path workDir = tempDir.resolve("work");
+		Files.createDirectories(workDir);
+
+		final int keepEvery = 5;
+		int frameBytes = WIDTH * HEIGHT * 4;
+		FramePool pool = new FramePool(frameBytes, 6);
+		SegmentRecorder recorder = new SegmentRecorder(
+				ffmpeg, tempDir.resolve("segments"), WIDTH, HEIGHT, FPS, SEGMENT_SECONDS, WRAP, 3000,
+				VideoEncoder.SOFTWARE);
+
+		assertTrue(recorder.start(), "recorder should start");
+		try {
+			feedFrames(recorder, pool, frameBytes, FPS * 6, keepEvery);
+			assertTrue(recorder.isRunning(), "recorder should still be running: " + recorder.failure());
+			assertTrue(recorder.framesDuplicated() >= recorder.framesWritten() * (keepEvery - 1) - keepEvery,
+					"every missed slot should be accounted for as a repeat: " + recorder.framesWritten()
+							+ " written, " + recorder.framesDuplicated() + " repeated");
+
+			ClipAssembler.Result result = new ClipAssembler(ffmpeg).assemble(recorder.layout(), 3, outputDir,
+					workDir, null, recorder.timelineOriginNanos());
+			assertNotNull(result);
+
+			Probe probe = ffprobe(ffmpeg, result.file());
+			assertTrue(probe.durationSeconds >= 2.0 && probe.durationSeconds <= 5.0,
+					"a clip of sparse frames should still be roughly 3s long, was " + probe.durationSeconds);
+
+			double[] shown = frameReds(ffmpeg, result.file());
+			assertTrue(shown.length >= FPS * 2, "clip should hold a full-rate timeline, had " + shown.length + " frames");
+
+			// The encoder shifts colours by a few levels, so the pictures are told apart by when the
+			// colour moves rather than by its exact value. A picture that went missing would show up
+			// here as its neighbour being held twice as long.
+			int changes = 0;
+			int runStart = -1;
+			for (int k = 1; k < shown.length; k++) {
+				if (Math.abs(shown[k] - shown[k - 1]) <= 1.0) {
+					continue;
+				}
+				assertTrue(shown[k] > shown[k - 1], "pictures should appear in the order they were fed, but frame "
+						+ k + " went from " + shown[k - 1] + " back to " + shown[k]);
+				// The clip's first picture starts wherever the segment boundary fell, so only the
+				// pictures after it have a full run to measure.
+				if (runStart >= 0) {
+					assertTrue(k - runStart == keepEvery, "each picture should be held for " + keepEvery
+							+ " frames, but the one before frame " + k + " was held for " + (k - runStart));
+				}
+				runStart = k;
+				changes++;
+			}
+			assertTrue(changes >= FPS * 2 / keepEvery, "expected the fed pictures to show up, saw " + changes + " changes");
+		} finally {
+			recorder.stop();
+		}
+	}
+
 	// ------------------------------------------------------------------ helpers
 
 	/** Feeds frames in real time, each painted with its own index, and returns the clock they started on. */
 	private static long feedFrames(SegmentRecorder recorder, FramePool pool, int frameBytes, int totalFrames)
 			throws InterruptedException {
+		return feedFrames(recorder, pool, frameBytes, totalFrames, 1);
+	}
+
+	/** As above, but only every {@code keepEvery}-th frame is handed over; the others are never captured. */
+	private static long feedFrames(SegmentRecorder recorder, FramePool pool, int frameBytes, int totalFrames,
+			int keepEvery) throws InterruptedException {
 		// Real-time feeding so FFmpeg rolls several segments. Colours shift over time, which also
 		// makes any frame ordering bug visible in the output.
 		long start = System.nanoTime();
 		for (int i = 0; i < totalFrames; i++) {
-			final ByteBuffer buf = pool.acquire();
+			final ByteBuffer buf = i % keepEvery == 0 ? pool.acquire() : null;
 			if (buf != null) {
 				fill(buf, frameBytes, (byte) (i * 4), (byte) (i * 2), (byte) i);
 				long ts = start + (long) i * 1_000_000_000L / FPS;
@@ -191,6 +265,26 @@ class PipelineIntegrationTest {
 		return (int) Math.round(sum / (double) pixels);
 	}
 
+	/** The average red level of every frame of the clip, in order; the feeder painted it with the frame index. */
+	private static double[] frameReds(Path ffmpeg, Path clip) throws IOException, InterruptedException {
+		// Solid-colour frames, so a 4x4 thumbnail of each is all that has to cross the pipe.
+		Process p = new ProcessBuilder(ffmpeg.toString(), "-hide_banner", "-loglevel", "error", "-nostdin",
+				"-i", clip.toString(), "-vf", "scale=4:4", "-f", "rawvideo", "-pix_fmt", "bgra", "pipe:1")
+				.start();
+		byte[] raw = p.getInputStream().readAllBytes();
+		p.waitFor(30, TimeUnit.SECONDS);
+		int thumbBytes = 4 * 4 * 4;
+		double[] reds = new double[raw.length / thumbBytes];
+		for (int f = 0; f < reds.length; f++) {
+			long sum = 0;
+			for (int px = 0; px < 16; px++) {
+				sum += raw[f * thumbBytes + px * 4 + 2] & 0xFF;
+			}
+			reds[f] = sum / 16.0;
+		}
+		return reds;
+	}
+
 	/** Seconds into the clip's audio where the first click lands, or -1 if there is none. */
 	private static double firstClickSeconds(Path ffmpeg, Path clip) throws IOException, InterruptedException {
 		Process p = new ProcessBuilder(ffmpeg.toString(), "-hide_banner", "-loglevel", "error", "-nostdin",
@@ -226,6 +320,61 @@ class PipelineIntegrationTest {
 		boolean isH264() {
 			return "h264".equalsIgnoreCase(codec);
 		}
+	}
+
+	/**
+	 * The editor's volume slider: the gain set in the editor is the gain in the saved file, and a
+	 * muted save carries no audio track at all.
+	 */
+	@Test
+	void savedClipCarriesTheEditorVolume(@TempDir Path tempDir) throws Exception {
+		Path ffmpeg = locateFfmpeg();
+		assumeTrue(ffmpeg != null, "No FFmpeg binary available; set -Dclipify.ffmpeg=<path> to run this test");
+
+		// 4 s test clip with a quiet tone (low enough that doubling it cannot clip).
+		Path src = tempDir.resolve("src.mp4");
+		Process make = new ProcessBuilder(ffmpeg.toString(), "-hide_banner", "-loglevel", "error", "-nostdin",
+				"-f", "lavfi", "-i", "testsrc=size=" + WIDTH + "x" + HEIGHT + ":rate=" + FPS + ":duration=4",
+				"-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=4",
+				"-af", "volume=0.1", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-shortest",
+				"-y", src.toString()).redirectErrorStream(true).start();
+		make.getInputStream().readAllBytes();
+		assertTrue(make.waitFor(60, TimeUnit.SECONDS) && make.exitValue() == 0, "test clip should be made");
+
+		Path same = tempDir.resolve("same.mp4");
+		Path loud = tempDir.resolve("loud.mp4");
+		Path quiet = tempDir.resolve("quiet.mp4");
+		Path muted = tempDir.resolve("muted.mp4");
+		ClipLibrary.trim(ffmpeg, src, 0.5, 3.5, 1.0, same);
+		ClipLibrary.trim(ffmpeg, src, 0.5, 3.5, 2.0, loud);
+		ClipLibrary.trim(ffmpeg, src, 0.5, 3.5, 0.5, quiet);
+		ClipLibrary.trim(ffmpeg, src, 0.5, 3.5, 0.0, muted);
+
+		double base = meanVolumeDb(ffmpeg, same);
+		assertTrue(Math.abs(meanVolumeDb(ffmpeg, loud) - base - 6.02) < 0.5, "200% should be +6 dB");
+		assertTrue(Math.abs(meanVolumeDb(ffmpeg, quiet) - base + 6.02) < 0.5, "50% should be -6 dB");
+		assertTrue(!streamInfo(ffmpeg, muted).contains("Audio:"), "a muted save should have no audio track");
+		assertTrue(streamInfo(ffmpeg, muted).contains("Video:"), "a muted save should keep its video");
+		Probe p = ffprobe(ffmpeg, muted);
+		assertTrue(p.durationSeconds > 2.5 && p.durationSeconds < 3.5, "trim still applies when muted: " + p.durationSeconds);
+	}
+
+	private static String streamInfo(Path ffmpeg, Path file) throws IOException, InterruptedException {
+		Process p = new ProcessBuilder(ffmpeg.toString(), "-hide_banner", "-i", file.toString())
+				.redirectErrorStream(true).start();
+		String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+		p.waitFor(30, TimeUnit.SECONDS);
+		return out;
+	}
+
+	private static double meanVolumeDb(Path ffmpeg, Path file) throws IOException, InterruptedException {
+		Process p = new ProcessBuilder(ffmpeg.toString(), "-hide_banner", "-nostdin", "-i", file.toString(),
+				"-vn", "-af", "volumedetect", "-f", "null", "-").redirectErrorStream(true).start();
+		String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+		p.waitFor(30, TimeUnit.SECONDS);
+		var m = java.util.regex.Pattern.compile("mean_volume: (-?[0-9.]+) dB").matcher(out);
+		assertTrue(m.find(), "volumedetect output: " + out);
+		return Double.parseDouble(m.group(1));
 	}
 
 	private static Probe ffprobe(Path ffmpeg, Path file) throws IOException, InterruptedException {

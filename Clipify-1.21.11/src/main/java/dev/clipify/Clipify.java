@@ -87,11 +87,32 @@ public final class Clipify implements ClientModInitializer {
 
 	// ------------------------------------------------------------- hotkeys
 
+	/** The consent screen already came up on its own this session (it only does so once). */
+	private boolean ffmpegAsked;
+
+	/**
+	 * Opens the FFmpeg download question: by itself the first time the title screen shows in an
+	 * instance that has no FFmpeg, and on any clip request while FFmpeg still needs the player's OK.
+	 */
+	private void maybeAskForFfmpeg(MinecraftClient client, ReplayBufferService svc) {
+		boolean requested = svc.takeConsentScreenRequest();
+		if (client.currentScreen instanceof dev.clipify.ui.FfmpegConsentScreen || !svc.ffmpegNeedsConsent()) {
+			return;
+		}
+		boolean firstTitle = !ffmpegAsked && svc.awaitingFfmpegConsent()
+				&& client.currentScreen instanceof net.minecraft.client.gui.screen.TitleScreen;
+		if (requested || firstTitle) {
+			ffmpegAsked = true;
+			client.setScreen(new dev.clipify.ui.FfmpegConsentScreen(client.currentScreen, svc));
+		}
+	}
+
 	private void onClientTick(MinecraftClient client) {
 		ReplayBufferService svc = service;
 		if (svc == null) {
 			return;
 		}
+		maybeAskForFfmpeg(client, svc);
 		// Fire in-game AND over most screens (so you can screenshot/clip a menu or chat). The one
 		// exception is Clipify's own key-capturing screens, where a press is being *bound*, not fired.
 		net.minecraft.client.gui.screen.Screen screen = client.currentScreen;

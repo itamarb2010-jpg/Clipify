@@ -1,0 +1,12 @@
+Clipify 2.1.0
+
+Added
+- Minecraft 26.3 support (OpenGL and Vulkan). Clipify now ships for 1.21.11, 26.1.2 and 26.3.
+- Volume control in the clip editor, next to the fullscreen button: drag 0-200%, scroll to step, click the speaker to mute. The preview plays at that level and saving writes it into the file (muted = no sound track).
+
+Changed
+- Clipify now asks before downloading FFmpeg: a one-time screen per instance shows the size and source, and nothing downloads until you click Download.
+- New mod icon, matching the CurseForge page.
+
+Fixed
+- Clips turning into a slideshow on slow PCs. Missed frames no longer crowd out real ones, so clips stay real-time and in sync with their audio.
